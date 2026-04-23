@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import csv
+import fnmatch
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 DEFAULT_IGNORE_DIRS = {
     ".git",
@@ -56,7 +58,7 @@ TEXT_EXTENSIONS = {
 }
 
 IMPORTANT_FILE_PATTERNS = [
-    "README.md", "CLAUDE.md", "package.json", "pnpm-workspace.yaml", "turbo.json", "nx.json",
+    "README.md", "CLAUDE.md", "AGENTS.md", "package.json", "pnpm-workspace.yaml", "turbo.json", "nx.json",
     "pyproject.toml", "requirements.txt", "Pipfile", "poetry.lock", "Cargo.toml", "go.mod",
     "composer.json", "Gemfile", "pom.xml", "build.gradle", "settings.gradle", "Makefile",
     "Dockerfile", "docker-compose.yml", "docker-compose.yaml", ".env.example", ".env.sample",
@@ -73,6 +75,8 @@ MAX_TEXT_FILE_BYTES = 350_000
 MAX_SYMBOLS_PER_FILE = 40
 MAX_TREE_LINES = 500
 MAX_IMPORTANT_FILES = 80
+MAX_TOKEN_ROWS = 100
+MAX_ROUTING_HINTS = 80
 
 
 @dataclass
@@ -81,17 +85,15 @@ class FileInfo:
     ext: str
     size: int
     top_level: str
+    mtime_ns: int = 0
 
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def is_probably_text(path: Path) -> bool:
-    if path.suffix.lower() in TEXT_EXTENSIONS:
-        return True
-    name = path.name.lower()
-    return name in {"dockerfile", "makefile", ".env", ".env.example", ".env.sample", ".gitignore"}
+def estimate_tokens_from_text(text: str) -> int:
+    return max(1, len(text) // 4)
 
 
 def load_text(path: Path) -> str | None:
@@ -106,22 +108,76 @@ def load_text(path: Path) -> str | None:
         return None
 
 
+def estimate_tokens_for_file(root: Path, file: FileInfo) -> int:
+    text = load_text(root / file.path)
+    if text is not None:
+        return estimate_tokens_from_text(text)
+    return max(1, file.size // 4)
+
+
+def load_gitignore_patterns(root: Path) -> list[str]:
+    patterns: list[str] = []
+    for rel in [".gitignore", ".git/info/exclude"]:
+        path = root / rel
+        if not path.exists():
+            continue
+        try:
+            for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#") or line.startswith("!"):
+                    continue
+                patterns.append(line)
+        except Exception:
+            continue
+    return patterns
+
+
+def matches_ignore_pattern(rel_path: str, pattern: str) -> bool:
+    rel = rel_path.strip("/")
+    pat = pattern.strip()
+    if not pat:
+        return False
+
+    dir_only = pat.endswith("/")
+    if dir_only:
+        pat = pat[:-1]
+
+    pat = pat.lstrip("./")
+    rel_parts = rel.split("/")
+
+    if "/" not in pat:
+        if fnmatch.fnmatch(Path(rel).name, pat):
+            return True
+        if dir_only and pat in rel_parts:
+            return True
+        return False
+
+    if fnmatch.fnmatch(rel, pat):
+        return True
+    if fnmatch.fnmatch("/" + rel, pat):
+        return True
+    if fnmatch.fnmatch(rel, f"**/{pat}"):
+        return True
+    if dir_only and (rel == pat or rel.startswith(f"{pat}/") or f"/{pat}/" in f"/{rel}/"):
+        return True
+    return False
+
+
 def walk_files(root: Path) -> list[FileInfo]:
+    gitignore_patterns = load_gitignore_patterns(root)
     results: list[FileInfo] = []
 
     def is_ignored_path(rel_path: str) -> bool:
-        return any(
-            rel_path == prefix or rel_path.startswith(f"{prefix}/")
-            for prefix in DEFAULT_IGNORE_PATH_PREFIXES
-        )
+        if any(rel_path == prefix or rel_path.startswith(f"{prefix}/") for prefix in DEFAULT_IGNORE_PATH_PREFIXES):
+            return True
+        return any(matches_ignore_pattern(rel_path, pat) for pat in gitignore_patterns)
 
     for dirpath, dirnames, filenames in os.walk(root):
         rel_dir = os.path.relpath(dirpath, root)
         parts = [] if rel_dir == "." else rel_dir.split(os.sep)
         rel_dir_posix = "." if rel_dir == "." else Path(rel_dir).as_posix()
         dirnames[:] = [
-            d
-            for d in dirnames
+            d for d in dirnames
             if d not in DEFAULT_IGNORE_DIRS
             and not d.startswith(".DS_")
             and not is_ignored_path(d if rel_dir_posix == "." else f"{rel_dir_posix}/{d}")
@@ -141,13 +197,29 @@ def walk_files(root: Path) -> list[FileInfo]:
             if any(seg in DEFAULT_IGNORE_DIRS for seg in rel.split("/")):
                 continue
             try:
-                size = path.stat().st_size
+                stat = path.stat()
             except OSError:
                 continue
-            ext = path.suffix.lower()
-            top_level = rel.split("/")[0]
-            results.append(FileInfo(path=rel, ext=ext, size=size, top_level=top_level))
+            results.append(FileInfo(
+                path=rel,
+                ext=path.suffix.lower(),
+                size=stat.st_size,
+                top_level=rel.split("/")[0],
+                mtime_ns=stat.st_mtime_ns,
+            ))
     return sorted(results, key=lambda f: f.path)
+
+
+def compute_fingerprint(files: list[FileInfo]) -> str:
+    h = hashlib.sha256()
+    for f in files:
+        h.update(f.path.encode("utf-8"))
+        h.update(b"\0")
+        h.update(str(f.size).encode("ascii"))
+        h.update(b"\0")
+        h.update(str(f.mtime_ns).encode("ascii"))
+        h.update(b"\n")
+    return h.hexdigest()
 
 
 def detect_stack(root: Path, files: list[FileInfo]) -> dict[str, list[str]]:
@@ -219,7 +291,7 @@ def detect_stack(root: Path, files: list[FileInfo]) -> dict[str, list[str]]:
         stack["tooling"].append("Docker Compose")
     if has("Dockerfile"):
         stack["tooling"].append("Docker")
-    if has(".github/workflows"):
+    if any(p.startswith(".github/workflows/") for p in present):
         stack["tooling"].append("GitHub Actions")
 
     for key in list(stack.keys()):
@@ -276,7 +348,7 @@ def likely_important_files(files: list[FileInfo]) -> list[str]:
         name = f.path.split("/")[-1]
         if name in IMPORTANT_FILE_PATTERNS or f.path in IMPORTANT_FILE_PATTERNS:
             candidates.add(f.path)
-        if any(part in {"README.md", "CLAUDE.md"} for part in f.path.split("/")):
+        if any(part in {"README.md", "CLAUDE.md", "AGENTS.md"} for part in f.path.split("/")):
             candidates.add(f.path)
         if f.path.count("/") <= 1 and f.ext in {".json", ".toml", ".yml", ".yaml", ".md", ".py", ".ts", ".tsx", ".js"}:
             candidates.add(f.path)
@@ -285,7 +357,7 @@ def likely_important_files(files: list[FileInfo]) -> list[str]:
     for path in candidates:
         score = 0
         base = path.split("/")[-1]
-        if base in {"README.md", "CLAUDE.md"}:
+        if base in {"README.md", "CLAUDE.md", "AGENTS.md"}:
             score += 50
         if any(token in base.lower() for token in ["config", "main", "server", "app", "route", "docker", "package", "pyproject"]):
             score += 20
@@ -305,17 +377,14 @@ def likely_entrypoints(files: list[FileInfo]) -> list[str]:
             score += 30
         if any(hint in filename for hint in ENTRYPOINT_NAME_HINTS):
             score += 10
-        if filename in {
-            "package.json", "pyproject.toml", "go.mod", "cargo.toml", "dockerfile",
-            "next.config.js", "next.config.mjs", "next.config.ts", "vite.config.ts", "vite.config.js"
-        }:
+        if filename in {"package.json", "pyproject.toml", "go.mod", "cargo.toml", "dockerfile", "next.config.js", "next.config.mjs", "next.config.ts", "vite.config.ts", "vite.config.js"}:
             score += 20
         if f.path.startswith("src/"):
             score += 5
         if score > 0:
             candidates.append((score, f.path))
     candidates.sort(key=lambda x: (-x[0], x[1]))
-    seen = []
+    seen: list[str] = []
     for _, p in candidates:
         if p not in seen:
             seen.append(p)
@@ -437,6 +506,101 @@ def build_symbol_index(root: Path, files: list[FileInfo]) -> dict[str, list[str]
     return out
 
 
+def build_token_counts(root: Path, files: list[FileInfo]) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
+    by_file: list[tuple[str, int]] = []
+    by_dir: Counter[str] = Counter()
+    for f in files:
+        tokens = estimate_tokens_for_file(root, f)
+        by_file.append((f.path, tokens))
+        parts = f.path.split("/")
+        for i in range(1, len(parts)):
+            by_dir["/".join(parts[:i])] += tokens
+        by_dir["."] += tokens
+    by_file.sort(key=lambda x: (-x[1], x[0]))
+    dir_rows = sorted(by_dir.items(), key=lambda x: (-x[1], x[0]))
+    return by_file[:MAX_TOKEN_ROWS], dir_rows[:MAX_TOKEN_ROWS]
+
+
+def build_task_routing(files: list[FileInfo], symbol_index: dict[str, list[str]], areas: dict[str, dict[str, object]]) -> dict[str, list[str]]:
+    stop = {
+        "src", "app", "apps", "packages", "pkg", "lib", "libs", "core", "shared", "common", "components",
+        "pages", "page", "routes", "route", "api", "server", "client", "frontend", "backend", "service",
+        "services", "module", "modules", "internal", "public", "private", "utils", "util", "helpers",
+        "tests", "test", "spec", "docs", "doc", "scripts", "config", "configs"
+    }
+    hits: dict[str, Counter[str]] = defaultdict(Counter)
+    token_re = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{2,}")
+
+    for top in areas:
+        key = top.lower().replace("_", "-")
+        if key not in stop and len(key) >= 3:
+            hits[key][f"{top}/"] += 3
+
+    for f in files:
+        path = f.path.lower()
+        for t in set(token_re.findall(path)):
+            if t in stop:
+                continue
+            weight = 1
+            if any(mark in t for mark in ["auth", "billing", "payment", "invoice", "login", "user", "account", "profile", "admin", "search", "cart", "order", "checkout", "notification", "email", "sms", "chat", "message", "onboarding", "settings", "report", "analytics", "schema", "migration", "worker", "queue"]):
+                weight += 2
+            hits[t][f.path] += weight
+        for sym in symbol_index.get(f.path, [])[:10]:
+            for t in token_re.findall(sym.lower()):
+                if t in stop:
+                    continue
+                hits[t][f.path] += 1
+
+    result: dict[str, list[str]] = {}
+    for key, counter in hits.items():
+        ranked = [path for path, _ in counter.most_common(8)]
+        if ranked:
+            result[key] = ranked
+    return dict(sorted(result.items())[:MAX_ROUTING_HINTS])
+
+
+def collect_git_hotspots(root: Path, limit: int = 200) -> dict[str, object]:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "log", f"-n{limit}", "--name-only", "--pretty=format:__COMMIT__"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return {"available": False, "reason": "git not available"}
+
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return {"available": False, "reason": "git log unavailable"}
+
+    file_counts: Counter[str] = Counter()
+    cochange: Counter[tuple[str, str]] = Counter()
+    current_files: set[str] = set()
+    for raw in proc.stdout.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line == "__COMMIT__":
+            ordered = sorted(current_files)
+            for i in range(len(ordered)):
+                for j in range(i + 1, len(ordered)):
+                    cochange[(ordered[i], ordered[j])] += 1
+            current_files = set()
+            continue
+        current_files.add(line)
+        file_counts[line] += 1
+
+    return {
+        "available": True,
+        "top_files": file_counts.most_common(30),
+        "top_pairs": [
+            {"a": a, "b": b, "count": count}
+            for (a, b), count in sorted(cochange.items(), key=lambda x: (-x[1], x[0]))[:20]
+        ],
+    }
+
+
 def render_tree(files: list[FileInfo]) -> str:
     tree: dict = {}
     for f in files:
@@ -465,8 +629,7 @@ def write_markdown(path: Path, content: str) -> None:
     path.write_text(content.rstrip() + "\n", encoding="utf-8")
 
 
-def main() -> int:
-    root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path.cwd().resolve()
+def build_pack(root: Path) -> dict[str, object]:
     out_dir = root / ".claude" / "project-context"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -477,7 +640,11 @@ def main() -> int:
     entrypoints = likely_entrypoints(files)
     areas = build_areas(files)
     symbol_index = build_symbol_index(root, files)
+    token_files, token_dirs = build_token_counts(root, files)
+    task_routing = build_task_routing(files, symbol_index, areas)
+    git_hotspots = collect_git_hotspots(root)
     tree = render_tree(files)
+    fingerprint = compute_fingerprint(files)
 
     ext_counts = Counter(f.ext or "[no extension]" for f in files)
     top_level_counts = Counter(f.top_level for f in files)
@@ -494,6 +661,8 @@ def main() -> int:
         "important_files_count": len(important_files),
         "entrypoints_count": len(entrypoints),
         "symbol_index_files": len(symbol_index),
+        "fingerprint": fingerprint,
+        "supports_check_stale": True,
     }
 
     overview = f"""
@@ -519,11 +688,11 @@ Root: `{root}`
 
 """ + "\n".join(f"- `{p}`" for p in important_files[:20]) + """
 
-## Notes
+## V2 notes
 
 - This file is deterministic and heuristic-based.
-- Treat framework and entrypoint detection as probable, not authoritative.
-- Use `ENTRYPOINTS.md`, `COMMANDS.md`, and `AREAS.md` to narrow task scope before broad search.
+- V2 adds token concentration, task-routing hints, change hotspots, and a staleness fingerprint.
+- Use `TASK_ROUTING.md`, `TOKEN_COUNTS.md`, and `CHANGE_HOTSPOTS.md` to reduce blind repo-wide search.
 """
     write_markdown(out_dir / "OVERVIEW.md", overview)
 
@@ -583,6 +752,96 @@ Root: `{root}`
         symbol_lines.append("No symbols extracted confidently.")
     write_markdown(out_dir / "SYMBOL_INDEX.md", "\n".join(symbol_lines))
 
+    token_lines = [
+        "# Token Counts",
+        "",
+        "Approximate token concentration to help avoid blowing context on the wrong files.",
+        "",
+        "## Heaviest directories",
+        "",
+    ]
+    for path, tokens in token_dirs[:30]:
+        token_lines.append(f"- `{path}` → ~{tokens:,} tokens")
+    token_lines.extend(["", "## Heaviest files", ""])
+    for path, tokens in token_files[:40]:
+        token_lines.append(f"- `{path}` → ~{tokens:,} tokens")
+    token_lines.extend([
+        "",
+        "## How to use this",
+        "",
+        "- Start with lighter, high-signal files when possible.",
+        "- Avoid loading token-heavy files until the routing layer points to them.",
+        "- Use this file to budget context and pick compressed summaries first.",
+    ])
+    write_markdown(out_dir / "TOKEN_COUNTS.md", "\n".join(token_lines))
+
+    routing_lines = [
+        "# Task Routing",
+        "",
+        "Use this as a first-pass domain map before broad search.",
+        "",
+        "## Suggested domains",
+        "",
+    ]
+    if not task_routing:
+        routing_lines.append("- No strong routing hints extracted.")
+    else:
+        for domain, paths in task_routing.items():
+            routing_lines.append(f"## `{domain}`")
+            for path in paths:
+                routing_lines.append(f"- `{path}`")
+            routing_lines.append("")
+    routing_lines.extend([
+        "## How to use this",
+        "",
+        "1. Match the user's request to one or more domains above.",
+        "2. Search only those folders/files first.",
+        "3. Expand scope only if the first pass is weak or contradictory.",
+    ])
+    write_markdown(out_dir / "TASK_ROUTING.md", "\n".join(routing_lines))
+
+    hotspot_lines = [
+        "# Change Hotspots",
+        "",
+        "Git-derived hints about files that change often and files that often change together.",
+        "",
+    ]
+    if not git_hotspots.get("available"):
+        hotspot_lines.append(f"- Hotspot data unavailable: {git_hotspots.get('reason', 'unknown reason')}")
+    else:
+        hotspot_lines.extend(["## Frequently changed files", ""])
+        for path, count in git_hotspots["top_files"]:
+            hotspot_lines.append(f"- `{path}` → {count} recent commits")
+        hotspot_lines.extend(["", "## Files that often change together", ""])
+        for row in git_hotspots["top_pairs"]:
+            hotspot_lines.append(f"- `{row['a']}` + `{row['b']}` → {row['count']} co-changes")
+    hotspot_lines.extend([
+        "",
+        "## How to use this",
+        "",
+        "- When editing one hotspot file, check its common co-change partners.",
+        "- Use this as a test/config discovery hint, not a correctness guarantee.",
+    ])
+    write_markdown(out_dir / "CHANGE_HOTSPOTS.md", "\n".join(hotspot_lines))
+
+    staleness_lines = [
+        "# Staleness",
+        "",
+        f"- Generated at: `{manifest['generated_at_utc']}`",
+        f"- Fingerprint: `{fingerprint}`",
+        "",
+        "## Check command",
+        "",
+        "Run this to see whether the current repo still matches the manifest:",
+        "",
+        "```bash",
+        "python scripts/build_context_pack.py . --check-stale",
+        "```",
+        "",
+        "If the fingerprint changed, refresh the pack before relying on it for structural guidance.",
+    ]
+    write_markdown(out_dir / "STALENESS.md", "\n".join(staleness_lines))
+
     (out_dir / "DIRECTORY_TREE.txt").write_text(tree + "\n", encoding="utf-8")
     (out_dir / "MANIFEST.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
@@ -592,7 +851,44 @@ Root: `{root}`
         for row in files:
             writer.writerow([row.path, row.ext, row.size, row.top_level])
 
-    print(f"Wrote project context pack to {out_dir}")
+    return manifest
+
+
+def check_stale(root: Path) -> int:
+    manifest_path = root / ".claude" / "project-context" / "MANIFEST.json"
+    if not manifest_path.exists():
+        print("STALE: manifest missing")
+        return 2
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        print("STALE: manifest unreadable")
+        return 2
+
+    current_files = walk_files(root)
+    current_fingerprint = compute_fingerprint(current_files)
+    old_fingerprint = manifest.get("fingerprint")
+    if old_fingerprint == current_fingerprint:
+        print("OK: project context pack appears current")
+        return 0
+
+    print("STALE: fingerprint changed")
+    print(f"old={old_fingerprint}")
+    print(f"new={current_fingerprint}")
+    return 1
+
+
+def main() -> int:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    root = Path(args[0]).resolve() if args else Path.cwd().resolve()
+
+    if "--check-stale" in flags:
+        return check_stale(root)
+
+    manifest = build_pack(root)
+    print(f"Wrote project context pack to {root / '.claude' / 'project-context'}")
+    print(f"Fingerprint: {manifest['fingerprint']}")
     return 0
 
 

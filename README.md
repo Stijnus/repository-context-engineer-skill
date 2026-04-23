@@ -75,6 +75,7 @@ The builder generates:
 - `AGENTS.md` — Codex version
 - `scripts/build_context_pack.py` — shared builder
 - `examples/settings.snippets.jsonc` — optional Claude Code hook example
+- `USAGE.md` — practical examples, commands, and expected output
 
 ## Install for Claude Code
 
@@ -120,7 +121,48 @@ scripts/build_context_pack.py
 
 If you place it somewhere else, update the command inside `AGENTS.md`.
 
-## Shared workflow
+## How to use it in practice
+
+### There are no special slash commands
+
+This package does **not** add custom slash commands.
+
+Use normal prompts such as:
+
+- “Understand this repo before making changes.”
+- “Build or refresh the repo context pack first.”
+- “Map the codebase, then tell me which files likely own auth.”
+- “Use the repo map first, then scoped search, then direct file reads.”
+
+For Claude Code, `SKILL.md` tells Claude when to apply this flow.
+
+For Codex, `AGENTS.md` tells Codex when to apply this flow.
+
+### Manual builder commands
+
+If you want to run the builder directly yourself, use one of these:
+
+**Codex / generic repo layout**
+
+```bash
+python scripts/build_context_pack.py .
+```
+
+**Claude Code project-local skill install**
+
+```bash
+python .claude/skills/repository-context-engineer/scripts/build_context_pack.py .
+```
+
+**Claude Code global skill install**
+
+Adjust the path to wherever you installed the skill globally, then run:
+
+```bash
+python /path/to/repository-context-engineer/scripts/build_context_pack.py .
+```
+
+### Shared workflow
 
 1. Check whether `.claude/project-context/` exists.
 2. If missing or stale, run the builder.
@@ -133,6 +175,32 @@ If you place it somewhere else, update the command inside `AGENTS.md`.
 For exact questions like “where is onboarding?” or “which files own billing?”, use the pack as the routing layer first, then run scoped search in the likely folders. Avoid answering exact ownership from the pack alone unless the generated artifacts already prove it clearly.
 
 After structural edits, such as adding feature folders, moving entrypoints, changing commands, or updating architecture docs, refresh the pack before relying on it for the next task. After ordinary code edits, a stale check is usually enough.
+
+## What to expect from the agent
+
+After the package is used correctly, the agent should usually tell you:
+
+- whether the context pack was **generated**, **refreshed**, **reused**, or is likely **stale**
+- where the pack was written
+- the top-level ownership map of the repo
+- the key docs, commands, configs, and entrypoints
+- the most likely files or folders for your task
+- the confidence boundary: it has a **working repo map**, not full line-by-line memory
+
+Before editing behavior, the agent should still read:
+
+- the exact implementation files
+- nearby tests
+- nearby configs if they affect runtime or build behavior
+
+## What not to expect
+
+Do not expect this package to:
+
+- instantly know exact file ownership without verification
+- replace direct file reads before behavior edits
+- behave like a full language server or compiler
+- automatically commit generated `.claude/project-context/` output unless you explicitly want that
 
 ## Why this is different from repo packers
 

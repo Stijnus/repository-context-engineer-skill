@@ -177,7 +177,8 @@ def walk_files(root: Path) -> list[FileInfo]:
         parts = [] if rel_dir == "." else rel_dir.split(os.sep)
         rel_dir_posix = "." if rel_dir == "." else Path(rel_dir).as_posix()
         dirnames[:] = [
-            d for d in dirnames
+            d
+            for d in dirnames
             if d not in DEFAULT_IGNORE_DIRS
             and not d.startswith(".DS_")
             and not is_ignored_path(d if rel_dir_posix == "." else f"{rel_dir_posix}/{d}")
@@ -200,31 +201,33 @@ def walk_files(root: Path) -> list[FileInfo]:
                 stat = path.stat()
             except OSError:
                 continue
-            results.append(FileInfo(
-                path=rel,
-                ext=path.suffix.lower(),
-                size=stat.st_size,
-                top_level=rel.split("/")[0],
-                mtime_ns=stat.st_mtime_ns,
-            ))
+            results.append(
+                FileInfo(
+                    path=rel,
+                    ext=path.suffix.lower(),
+                    size=stat.st_size,
+                    top_level=rel.split("/")[0],
+                    mtime_ns=stat.st_mtime_ns,
+                )
+            )
     return sorted(results, key=lambda f: f.path)
 
 
 def compute_fingerprint(files: list[FileInfo]) -> str:
-    h = hashlib.sha256()
-    for f in files:
-        h.update(f.path.encode("utf-8"))
-        h.update(b"\0")
-        h.update(str(f.size).encode("ascii"))
-        h.update(b"\0")
-        h.update(str(f.mtime_ns).encode("ascii"))
-        h.update(b"\n")
-    return h.hexdigest()
+    digest = hashlib.sha256()
+    for file_info in files:
+        digest.update(file_info.path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(file_info.size).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(str(file_info.mtime_ns).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def detect_stack(root: Path, files: list[FileInfo]) -> dict[str, list[str]]:
     present = {f.path for f in files}
-    lower_present = {p.lower() for p in present}
+    lower_present = {path.lower() for path in present}
     stack: dict[str, list[str]] = defaultdict(list)
 
     def has(name: str) -> bool:
@@ -232,7 +235,7 @@ def detect_stack(root: Path, files: list[FileInfo]) -> dict[str, list[str]]:
 
     if has("package.json"):
         stack["runtime"].append("Node.js")
-    if has("pyproject.toml") or has("requirements.txt") or has("Pipfile"):
+    if has("pyproject.toml") or has("requirements.txt") or has("Pipfile") or any(f.ext == ".py" for f in files):
         stack["runtime"].append("Python")
     if has("Cargo.toml"):
         stack["runtime"].append("Rust")
@@ -291,8 +294,10 @@ def detect_stack(root: Path, files: list[FileInfo]) -> dict[str, list[str]]:
         stack["tooling"].append("Docker Compose")
     if has("Dockerfile"):
         stack["tooling"].append("Docker")
-    if any(p.startswith(".github/workflows/") for p in present):
+    if any(path.startswith(".github/workflows/") for path in lower_present):
         stack["tooling"].append("GitHub Actions")
+    if any(f.path.startswith("scripts/") and f.ext == ".py" for f in files):
+        stack["tooling"].append("Python scripts")
 
     for key in list(stack.keys()):
         stack[key] = sorted(set(stack[key]))
@@ -316,10 +321,10 @@ def extract_commands(root: Path) -> list[tuple[str, str, str]]:
     if makefile.exists():
         text = load_text(makefile) or ""
         for line in text.splitlines():
-            m = re.match(r"^([A-Za-z0-9_.\-]+):(?:\s|$)", line)
-            if not m:
+            match = re.match(r"^([A-Za-z0-9_.\-]+):(?:\s|$)", line)
+            if not match:
                 continue
-            target = m.group(1)
+            target = match.group(1)
             if target.startswith("."):
                 continue
             rows.append(("Makefile", target, f"make {target}"))
@@ -344,16 +349,16 @@ def extract_commands(root: Path) -> list[tuple[str, str, str]]:
 
 def likely_important_files(files: list[FileInfo]) -> list[str]:
     candidates: set[str] = set()
-    for f in files:
-        name = f.path.split("/")[-1]
-        if name in IMPORTANT_FILE_PATTERNS or f.path in IMPORTANT_FILE_PATTERNS:
-            candidates.add(f.path)
-        if any(part in {"README.md", "CLAUDE.md", "AGENTS.md"} for part in f.path.split("/")):
-            candidates.add(f.path)
-        if f.path.count("/") <= 1 and f.ext in {".json", ".toml", ".yml", ".yaml", ".md", ".py", ".ts", ".tsx", ".js"}:
-            candidates.add(f.path)
+    for file_info in files:
+        name = file_info.path.split("/")[-1]
+        if name in IMPORTANT_FILE_PATTERNS or file_info.path in IMPORTANT_FILE_PATTERNS:
+            candidates.add(file_info.path)
+        if any(part in {"README.md", "CLAUDE.md", "AGENTS.md"} for part in file_info.path.split("/")):
+            candidates.add(file_info.path)
+        if file_info.path.count("/") <= 1 and file_info.ext in {".json", ".toml", ".yml", ".yaml", ".md", ".py", ".ts", ".tsx", ".js"}:
+            candidates.add(file_info.path)
 
-    scored = []
+    scored: list[tuple[int, str]] = []
     for path in candidates:
         score = 0
         base = path.split("/")[-1]
@@ -363,61 +368,79 @@ def likely_important_files(files: list[FileInfo]) -> list[str]:
             score += 20
         score += max(0, 10 - path.count("/"))
         scored.append((score, path))
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    return [p for _, p in scored[:MAX_IMPORTANT_FILES]]
+    scored.sort(key=lambda row: (-row[0], row[1]))
+    return [path for _, path in scored[:MAX_IMPORTANT_FILES]]
 
 
 def likely_entrypoints(files: list[FileInfo]) -> list[str]:
     candidates: list[tuple[int, str]] = []
-    for f in files:
-        base = Path(f.path).stem.lower()
-        filename = Path(f.path).name.lower()
+    for file_info in files:
+        base = Path(file_info.path).stem.lower()
+        filename = Path(file_info.path).name.lower()
         score = 0
         if any(hint == base for hint in ENTRYPOINT_NAME_HINTS):
             score += 30
         if any(hint in filename for hint in ENTRYPOINT_NAME_HINTS):
             score += 10
-        if filename in {"package.json", "pyproject.toml", "go.mod", "cargo.toml", "dockerfile", "next.config.js", "next.config.mjs", "next.config.ts", "vite.config.ts", "vite.config.js"}:
+        if filename in {
+            "package.json",
+            "pyproject.toml",
+            "go.mod",
+            "cargo.toml",
+            "dockerfile",
+            "next.config.js",
+            "next.config.mjs",
+            "next.config.ts",
+            "vite.config.ts",
+            "vite.config.js",
+        }:
             score += 20
-        if f.path.startswith("src/"):
+        if file_info.path.startswith("src/"):
             score += 5
         if score > 0:
-            candidates.append((score, f.path))
-    candidates.sort(key=lambda x: (-x[0], x[1]))
+            candidates.append((score, file_info.path))
+    candidates.sort(key=lambda row: (-row[0], row[1]))
     seen: list[str] = []
-    for _, p in candidates:
-        if p not in seen:
-            seen.append(p)
+    for _, path in candidates:
+        if path not in seen:
+            seen.append(path)
     return seen[:40]
 
 
+def path_tokens(path: str) -> set[str]:
+    return {token for token in re.split(r"[/_.\-\s]+", path.lower()) if token}
+
+
 def infer_area_label(path: str) -> str:
-    p = path.lower()
-    if any(token in p for token in ["test", "spec", "__tests__", "cypress", "playwright"]):
+    tokens = path_tokens(path)
+    top = path.lower().split("/", 1)[0]
+    if top in {"scripts", "tools", "bin", "tasks"} or tokens & {"script", "scripts", "tool", "tools", "cli"}:
+        return "tooling or automation"
+    if tokens & {"test", "tests", "spec", "specs", "__tests__", "cypress", "playwright"}:
         return "tests"
-    if any(token in p for token in ["route", "router", "controller", "handler", "api"]):
+    if tokens & {"route", "routes", "router", "controller", "controllers", "handler", "handlers", "api"}:
         return "api or routing"
-    if any(token in p for token in ["component", "ui", "page", "screen", "view"]):
+    if tokens & {"component", "components", "ui", "page", "pages", "screen", "screens", "view", "views"}:
         return "frontend or user interface"
-    if any(token in p for token in ["service", "worker", "job", "queue", "consumer"]):
+    if tokens & {"service", "services", "worker", "workers", "job", "jobs", "queue", "consumer"}:
         return "services or background jobs"
-    if any(token in p for token in ["model", "schema", "db", "migration", "prisma", "sql"]):
+    if tokens & {"model", "models", "schema", "schemas", "db", "database", "migration", "migrations", "prisma", "sql"}:
         return "data or persistence"
-    if any(token in p for token in ["config", "settings", "env", "docker", "compose", "yaml", "toml"]):
+    if tokens & {"config", "configs", "settings", "env", "docker", "compose", "yaml", "yml", "toml"}:
         return "configuration"
     return "general code or assets"
 
 
 def build_areas(files: list[FileInfo]) -> dict[str, dict[str, object]]:
     grouped: dict[str, list[FileInfo]] = defaultdict(list)
-    for f in files:
-        grouped[f.top_level].append(f)
+    for file_info in files:
+        grouped[file_info.top_level].append(file_info)
 
     areas: dict[str, dict[str, object]] = {}
     for top, group in sorted(grouped.items()):
-        exts = Counter(f.ext or "[no extension]" for f in group)
-        sample_paths = [g.path for g in group[:8]]
-        label_votes = Counter(infer_area_label(g.path) for g in group[:40])
+        exts = Counter(file_info.ext or "[no extension]" for file_info in group)
+        sample_paths = [file_info.path for file_info in group[:8]]
+        label_votes = Counter(infer_area_label(file_info.path) for file_info in group[:40])
         areas[top] = {
             "file_count": len(group),
             "common_extensions": [ext for ext, _ in exts.most_common(6)],
@@ -465,16 +488,16 @@ def extract_symbols_from_text(path: str, text: str) -> list[str]:
         line = raw.strip()
         if not line or line.startswith("#") or line.startswith("//"):
             continue
-        for pat in patterns:
-            m = pat.search(line)
-            if m:
-                symbols.append(m.group(1))
+        for pattern in patterns:
+            match = pattern.search(line)
+            if match:
+                symbols.append(match.group(1))
                 break
-        for pat in route_patterns:
-            m = pat.search(line)
-            if not m:
+        for pattern in route_patterns:
+            match = pattern.search(line)
+            if not match:
                 continue
-            value = m.group(m.lastindex or 1)
+            value = match.group(match.lastindex or 1)
             if value.startswith("/"):
                 symbols.append(f"route {value}")
         if len(symbols) >= MAX_SYMBOLS_PER_FILE:
@@ -482,42 +505,42 @@ def extract_symbols_from_text(path: str, text: str) -> list[str]:
 
     deduped: list[str] = []
     seen = set()
-    for s in symbols:
-        if s in seen:
+    for symbol in symbols:
+        if symbol in seen:
             continue
-        seen.add(s)
-        deduped.append(s)
+        seen.add(symbol)
+        deduped.append(symbol)
     return deduped[:MAX_SYMBOLS_PER_FILE]
 
 
 def build_symbol_index(root: Path, files: list[FileInfo]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
-    for f in files:
-        if f.size > MAX_TEXT_FILE_BYTES:
+    for file_info in files:
+        if file_info.size > MAX_TEXT_FILE_BYTES:
             continue
-        if f.ext.lower() not in {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".java", ".kt", ".kts", ".cs", ".php", ".rb", ".rs", ".swift"}:
+        if file_info.ext.lower() not in {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".java", ".kt", ".kts", ".cs", ".php", ".rb", ".rs", ".swift"}:
             continue
-        text = load_text(root / f.path)
+        text = load_text(root / file_info.path)
         if not text:
             continue
-        symbols = extract_symbols_from_text(f.path, text)
+        symbols = extract_symbols_from_text(file_info.path, text)
         if symbols:
-            out[f.path] = symbols
+            out[file_info.path] = symbols
     return out
 
 
 def build_token_counts(root: Path, files: list[FileInfo]) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
     by_file: list[tuple[str, int]] = []
     by_dir: Counter[str] = Counter()
-    for f in files:
-        tokens = estimate_tokens_for_file(root, f)
-        by_file.append((f.path, tokens))
-        parts = f.path.split("/")
+    for file_info in files:
+        tokens = estimate_tokens_for_file(root, file_info)
+        by_file.append((file_info.path, tokens))
+        parts = file_info.path.split("/")
         for i in range(1, len(parts)):
             by_dir["/".join(parts[:i])] += tokens
         by_dir["."] += tokens
-    by_file.sort(key=lambda x: (-x[1], x[0]))
-    dir_rows = sorted(by_dir.items(), key=lambda x: (-x[1], x[0]))
+    by_file.sort(key=lambda row: (-row[1], row[0]))
+    dir_rows = sorted(by_dir.items(), key=lambda row: (-row[1], row[0]))
     return by_file[:MAX_TOKEN_ROWS], dir_rows[:MAX_TOKEN_ROWS]
 
 
@@ -526,7 +549,7 @@ def build_task_routing(files: list[FileInfo], symbol_index: dict[str, list[str]]
         "src", "app", "apps", "packages", "pkg", "lib", "libs", "core", "shared", "common", "components",
         "pages", "page", "routes", "route", "api", "server", "client", "frontend", "backend", "service",
         "services", "module", "modules", "internal", "public", "private", "utils", "util", "helpers",
-        "tests", "test", "spec", "docs", "doc", "scripts", "config", "configs"
+        "tests", "test", "spec", "docs", "doc", "scripts", "config", "configs",
     }
     hits: dict[str, Counter[str]] = defaultdict(Counter)
     token_re = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{2,}")
@@ -536,20 +559,24 @@ def build_task_routing(files: list[FileInfo], symbol_index: dict[str, list[str]]
         if key not in stop and len(key) >= 3:
             hits[key][f"{top}/"] += 3
 
-    for f in files:
-        path = f.path.lower()
-        for t in set(token_re.findall(path)):
-            if t in stop:
+    for file_info in files:
+        path = file_info.path.lower()
+        for token in set(token_re.findall(path)):
+            if token in stop:
                 continue
             weight = 1
-            if any(mark in t for mark in ["auth", "billing", "payment", "invoice", "login", "user", "account", "profile", "admin", "search", "cart", "order", "checkout", "notification", "email", "sms", "chat", "message", "onboarding", "settings", "report", "analytics", "schema", "migration", "worker", "queue"]):
+            if any(mark in token for mark in [
+                "auth", "billing", "payment", "invoice", "login", "user", "account", "profile", "admin", "search",
+                "cart", "order", "checkout", "notification", "email", "sms", "chat", "message", "onboarding",
+                "settings", "report", "analytics", "schema", "migration", "worker", "queue",
+            ]):
                 weight += 2
-            hits[t][f.path] += weight
-        for sym in symbol_index.get(f.path, [])[:10]:
-            for t in token_re.findall(sym.lower()):
-                if t in stop:
+            hits[token][file_info.path] += weight
+        for symbol in symbol_index.get(file_info.path, [])[:10]:
+            for token in token_re.findall(symbol.lower()):
+                if token in stop:
                     continue
-                hits[t][f.path] += 1
+                hits[token][file_info.path] += 1
 
     result: dict[str, list[str]] = {}
     for key, counter in hits.items():
@@ -596,16 +623,16 @@ def collect_git_hotspots(root: Path, limit: int = 200) -> dict[str, object]:
         "top_files": file_counts.most_common(30),
         "top_pairs": [
             {"a": a, "b": b, "count": count}
-            for (a, b), count in sorted(cochange.items(), key=lambda x: (-x[1], x[0]))[:20]
+            for (a, b), count in sorted(cochange.items(), key=lambda row: (-row[1], row[0]))[:20]
         ],
     }
 
 
 def render_tree(files: list[FileInfo]) -> str:
     tree: dict = {}
-    for f in files:
+    for file_info in files:
         node = tree
-        for part in f.path.split("/"):
+        for part in file_info.path.split("/"):
             node = node.setdefault(part, {})
 
     lines: list[str] = []
@@ -646,9 +673,9 @@ def build_pack(root: Path) -> dict[str, object]:
     tree = render_tree(files)
     fingerprint = compute_fingerprint(files)
 
-    ext_counts = Counter(f.ext or "[no extension]" for f in files)
-    top_level_counts = Counter(f.top_level for f in files)
-    total_bytes = sum(f.size for f in files)
+    ext_counts = Counter(file_info.ext or "[no extension]" for file_info in files)
+    top_level_counts = Counter(file_info.top_level for file_info in files)
+    total_bytes = sum(file_info.size for file_info in files)
 
     manifest = {
         "generated_at_utc": utc_now_iso(),
@@ -686,7 +713,7 @@ Root: `{root}`
 
 ## Most likely first-read files
 
-""" + "\n".join(f"- `{p}`" for p in important_files[:20]) + """
+""" + "\n".join(f"- `{path}`" for path in important_files[:20]) + """
 
 ## V2 notes
 
@@ -725,7 +752,7 @@ Root: `{root}`
     cmd_body = "\n".join(f"- `{source}` · **{name}** → `{cmd}`" for source, name, cmd in commands) or "- No commands extracted confidently."
     write_markdown(out_dir / "COMMANDS.md", f"# Commands\n\nThese commands were extracted from real project files when possible.\n\n{cmd_body}\n")
 
-    entry_body = "\n".join(f"- `{p}`" for p in entrypoints) or "- No clear entrypoints detected."
+    entry_body = "\n".join(f"- `{path}`" for path in entrypoints) or "- No clear entrypoints detected."
     write_markdown(out_dir / "ENTRYPOINTS.md", f"# Likely Entrypoints and Key Config\n\nThese are probable runtime starts, route surfaces, or configuration anchors.\n\n{entry_body}\n")
 
     area_lines = ["# Top-Level Areas", ""]
@@ -733,20 +760,20 @@ Root: `{root}`
         area_lines.append(f"## `{name}`")
         area_lines.append(f"- Inferred role: **{meta['inferred_role']}**")
         area_lines.append(f"- File count: **{meta['file_count']}**")
-        area_lines.append(f"- Common extensions: {', '.join(f'`{x}`' for x in meta['common_extensions'])}")
+        area_lines.append(f"- Common extensions: {', '.join(f'`{value}`' for value in meta['common_extensions'])}")
         area_lines.append("- Sample paths:")
-        for p in meta["sample_paths"]:
-            area_lines.append(f"  - `{p}`")
+        for path in meta["sample_paths"]:
+            area_lines.append(f"  - `{path}`")
         area_lines.append("")
     write_markdown(out_dir / "AREAS.md", "\n".join(area_lines))
 
-    write_markdown(out_dir / "IMPORTANT_FILES.md", "# Important Files\n\n" + "\n".join(f"- `{p}`" for p in important_files))
+    write_markdown(out_dir / "IMPORTANT_FILES.md", "# Important Files\n\n" + "\n".join(f"- `{path}`" for path in important_files))
 
     symbol_lines = ["# Symbol Index", "", "Best-effort top-level symbols and route hints extracted from source files.", ""]
     for path, symbols in sorted(symbol_index.items()):
         symbol_lines.append(f"## `{path}`")
-        for sym in symbols:
-            symbol_lines.append(f"- `{sym}`")
+        for symbol in symbols:
+            symbol_lines.append(f"- `{symbol}`")
         symbol_lines.append("")
     if len(symbol_lines) <= 4:
         symbol_lines.append("No symbols extracted confidently.")
@@ -845,8 +872,8 @@ Root: `{root}`
     (out_dir / "DIRECTORY_TREE.txt").write_text(tree + "\n", encoding="utf-8")
     (out_dir / "MANIFEST.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    with (out_dir / "FILES.csv").open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+    with (out_dir / "FILES.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
         writer.writerow(["path", "extension", "size_bytes", "top_level"])
         for row in files:
             writer.writerow([row.path, row.ext, row.size, row.top_level])
@@ -879,8 +906,8 @@ def check_stale(root: Path) -> int:
 
 
 def main() -> int:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
+    flags = {arg for arg in sys.argv[1:] if arg.startswith("--")}
     root = Path(args[0]).resolve() if args else Path.cwd().resolve()
 
     if "--check-stale" in flags:

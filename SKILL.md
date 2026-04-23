@@ -23,6 +23,19 @@ After using it, you should know:
 
 Do not claim full line-by-line understanding of the repo. Before editing behavior, read the exact files you will change and any adjacent tests/configs.
 
+## How users trigger this Skill
+
+There are no custom slash commands.
+
+Users trigger this Skill with ordinary prompts such as:
+
+- “Understand this repo before making changes.”
+- “Build or refresh the project context pack first.”
+- “Map the codebase, then tell me which files likely own billing.”
+- “Use the repo map first, then scoped search, then direct file reads.”
+
+If the task clearly requires repo understanding before editing, activate this Skill even if the user does not name it explicitly.
+
 ## When to use this Skill
 
 Use this Skill proactively when any of the following are true:
@@ -255,4 +268,5 @@ Before concluding, verify:
 
 - Builder script: `scripts/build_context_pack.py`
 - Installation/usage guide: `README.md`
+- Practical examples and commands: `USAGE.md`
 - Optional example hook snippets: `examples/settings.snippets.jsonc`

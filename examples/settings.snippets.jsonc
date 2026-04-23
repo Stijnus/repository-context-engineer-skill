@@ -1,0 +1,19 @@
+{
+  // Example snippets only. Merge carefully into your real Claude Code settings.
+
+  // Optional: after edits, rebuild the project context pack if structure may have changed.
+  // This is intentionally conservative; many teams may prefer to run the builder manually.
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f .claude/skills/repository-context-engineer/scripts/build_context_pack.py ]; then python .claude/skills/repository-context-engineer/scripts/build_context_pack.py . >/dev/null 2>&1 || true; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

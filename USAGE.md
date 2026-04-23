@@ -8,122 +8,103 @@ There are **no custom slash commands**.
 
 You use this package with normal prompts and, when needed, a normal Python command that builds the project context pack.
 
-## What this package actually does
+## Versions
 
-It builds a reusable repo map under:
+### V2
 
-```text
-.claude/project-context/
+Stable baseline:
+
+```bash
+python scripts/build_context_pack.py .
 ```
 
-That repo map helps the agent understand:
+### V3
 
-- the project structure
-- likely subsystem boundaries
-- likely entrypoints
-- important commands
-- important files
-- likely files for the task you asked for
+Preferred when you want **query-ranked context selection**:
 
-It does **not** replace reading exact implementation files before editing behavior.
+```bash
+python scripts/build_context_pack_v3.py .
+```
 
----
+## What V3 adds
+
+V3 adds several files intended to reduce repeated search and token waste:
+
+- `IMPORT_GRAPH.md`
+- `TOKEN_COUNTS.md`
+- `TASK_ROUTING.md`
+- `CHANGE_HOTSPOTS.md`
+- `STALENESS.md`
+- `QUERY_CONTEXT.md` when you use `--route-query`
+- `QUERY_RESULTS.json` when you use `--route-query`
 
 ## Claude Code usage
 
-### How Claude Code uses it
-
 Claude Code reads `SKILL.md` and uses that as the instruction surface for this package.
 
-In practice, that means you normally just ask Claude to work in the repo. If the task requires repo understanding first, the skill should kick in.
-
-### Example prompts for Claude Code
-
-Use prompts like these:
+Example prompts:
 
 - “Understand this repo before making changes.”
 - “Build or refresh the project context pack first.”
 - “Map the codebase, then tell me which files likely own onboarding.”
 - “Use the repo map first, then scoped search, then direct file reads.”
-- “Before editing auth, tell me the entrypoints, key configs, and likely owning files.”
+- “Run V3 query routing for auth and show me the top files first.”
 
-### Manual builder command for Claude Code
+Preferred V3 command for Claude Code:
 
-If the skill is installed project-locally:
+```bash
+python scripts/build_context_pack_v3.py .
+```
+
+If the skill is installed project-locally and you still want the older builder:
 
 ```bash
 python .claude/skills/repository-context-engineer/scripts/build_context_pack.py .
 ```
 
-If the skill is installed globally, adapt the path and run:
-
-```bash
-python /path/to/repository-context-engineer/scripts/build_context_pack.py .
-```
-
----
-
 ## Codex usage
-
-### How Codex uses it
 
 Codex reads `AGENTS.md` and uses that as the repo instruction surface.
 
-In practice, this means the repo itself tells Codex to build or reuse the context pack before broad searching when the task requires repo understanding.
-
-### Example prompts for Codex
-
-Use prompts like these:
+Example prompts:
 
 - “Understand this repo before making changes.”
 - “Refresh the repo map first, then tell me where billing likely lives.”
 - “Map the codebase and identify the likely files for the API auth flow.”
 - “Use the repo map first, then scoped search, then direct file reads.”
+- “Run V3 query routing for billing and show the ranked files.”
 
-### Manual builder command for Codex
-
-If the repo contains the builder at `scripts/build_context_pack.py`, run:
-
-```bash
-python scripts/build_context_pack.py .
-```
-
----
-
-## What commands matter
-
-There are two kinds of commands here.
-
-### 1. User prompts
-
-These are natural-language prompts that trigger the behavior:
-
-- “Understand this repo before making changes.”
-- “Build or refresh the context pack first.”
-- “Map the codebase before you search broadly.”
-- “Tell me which files likely own payments, then verify with scoped search.”
-
-### 2. Builder commands
-
-These commands generate the context pack:
-
-**Claude Code project-local install**
+Preferred V3 command for Codex:
 
 ```bash
-python .claude/skills/repository-context-engineer/scripts/build_context_pack.py .
+python scripts/build_context_pack_v3.py .
 ```
 
-**Codex / generic layout**
+## Commands that matter
+
+### Build the V3 pack
 
 ```bash
-python scripts/build_context_pack.py .
+python scripts/build_context_pack_v3.py .
 ```
 
----
+### Check whether the pack is stale
 
-## What to expect after you use it
+```bash
+python scripts/build_context_pack_v3.py . --check-stale
+```
 
-When the package is used correctly, the agent should usually tell you something like this:
+### Rank likely files for a specific task
+
+```bash
+python scripts/build_context_pack_v3.py . --route-query "billing flow"
+```
+
+That last command is the important V3 addition.
+
+## What to expect after you use V3
+
+When the package is used correctly, the agent should usually tell you:
 
 1. whether the pack was **generated**, **refreshed**, **reused**, or may be **stale**
 2. where the pack was written
@@ -132,17 +113,26 @@ When the package is used correctly, the agent should usually tell you something 
 5. the likely files or folders for your task
 6. the confidence boundary: it has a **working repo map**, not full line-by-line memory
 
+### What V3 query routing should additionally tell you
+
+If `--route-query` is used, expect:
+
+1. a ranked list of likely files
+2. reasons those files ranked highly
+3. import neighbors worth checking next
+4. git co-change hints that may reveal adjacent tests/configs
+5. token-heavy files that should be postponed until needed
+
 ### Example expected reply shape
 
-A good response after activation might look like:
+A good V3-style response might look like:
 
-- “I generated `.claude/project-context/` and mapped the repo.”
+- “I generated `.claude/project-context/` and ran V3 query routing for `billing flow`.”
 - “Top-level ownership looks like: `apps/` for user-facing apps, `packages/` for shared code, `scripts/` for tooling.”
-- “Key entrypoints and configs appear to be `apps/web/src/main.tsx`, `packages/api/src/server.ts`, and `package.json` scripts.”
-- “For your billing task, the likely files are `packages/api/src/routes/billing.ts` and `apps/web/src/features/billing/*`.”
+- “The highest-ranked files are `packages/api/src/routes/billing.ts`, `packages/api/src/services/billing_service.ts`, and `apps/web/src/features/billing/*`.”
+- “Those ranked highly because of path tokens, symbol matches, and import-graph neighbors.”
+- “`packages/api/src/routes/billing.ts` is a good first read; if needed, check its inbound references and co-change partners next.”
 - “I have a working repo map, but I still need to read the exact files before editing behavior.”
-
----
 
 ## What happens next after the pack is built
 
@@ -150,15 +140,14 @@ The correct sequence is:
 
 1. build or reuse the pack
 2. read the pack first
-3. form a file hypothesis
-4. run scoped search only in likely folders
-5. read exact files
-6. edit code
-7. refresh the pack only if structure changed
+3. if the task is specific, run `--route-query`
+4. form a file hypothesis
+5. run scoped search only in likely folders if still needed
+6. read exact files
+7. edit code
+8. refresh the pack only if structure changed
 
-This is the whole point of the package: **route first, search second, edit last**.
-
----
+This is the whole point of the package: **route first, rank second, search third, edit last**.
 
 ## Exact-location questions
 
@@ -171,13 +160,12 @@ When you ask things like:
 You should expect this behavior:
 
 1. the pack is used as the routing layer
-2. the agent narrows to likely folders first
-3. scoped search is run in those folders
-4. exact files are verified with direct reads
+2. V3 query routing is used if available
+3. the agent narrows to likely folders first
+4. scoped search is run only if needed
+5. exact files are verified with direct reads
 
 You should **not** expect the agent to claim exact file ownership from the pack alone unless the pack clearly proves it.
-
----
 
 ## When the pack should be refreshed
 
@@ -192,8 +180,6 @@ Refresh it after structural changes such as:
 
 After normal code edits, a stale check is usually enough.
 
----
-
 ## Failure behavior
 
 If the builder fails, the agent should:
@@ -202,9 +188,7 @@ If the builder fails, the agent should:
 - retry once if the failure looks transient
 - reuse the existing pack only if it still appears valid
 - say the pack may be stale
-- continue with scoped search rather than pretending the repo is fully mapped
-
----
+- continue with query routing or scoped search rather than pretending the repo is fully mapped
 
 ## What not to expect
 
@@ -215,8 +199,6 @@ Do not expect this package to:
 - behave like a compiler or language server
 - automatically commit generated `.claude/project-context/` files unless you ask for that
 
----
-
 ## Quick checklist
 
 Use this package correctly when the agent:
@@ -224,6 +206,6 @@ Use this package correctly when the agent:
 - builds or reuses the pack first
 - explains the pack status
 - summarizes the repo structure
-- identifies likely files for the task
+- ranks likely files for the task when V3 is available
 - reads exact files before editing behavior
 - avoids broad repo-wide search until it has a routing hypothesis

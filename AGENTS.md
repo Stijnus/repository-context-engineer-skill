@@ -31,8 +31,25 @@ Use this flow when the user says things like:
 - “Build or refresh the repo context pack first.”
 - “Map the codebase, then tell me which files likely own auth.”
 - “Use the repo map first, then scoped search, then direct file reads.”
+- “Run V3 query routing for billing and tell me the top files first.”
 
 If a task clearly requires repo understanding before editing, apply this flow even if the user does not name it explicitly.
+
+## Preferred commands
+
+Prefer V3 if it exists:
+
+```bash
+python scripts/build_context_pack_v3.py .
+python scripts/build_context_pack_v3.py . --check-stale
+python scripts/build_context_pack_v3.py . --route-query "billing flow"
+```
+
+Fallback only if V3 is unavailable:
+
+```bash
+python scripts/build_context_pack.py .
+```
 
 ## When to use this
 
@@ -58,18 +75,15 @@ Look for:
 - `.claude/project-context/ENTRYPOINTS.md`
 - `.claude/project-context/AREAS.md`
 - `.claude/project-context/SYMBOL_INDEX.md`
+- `.claude/project-context/TASK_ROUTING.md`
+- `.claude/project-context/TOKEN_COUNTS.md`
+- `.claude/project-context/IMPORT_GRAPH.md`
 
 If the pack exists and still appears usable, read it first before broad search.
 
 ### 2. Build or refresh the pack if needed
 
-From the repository root, run:
-
-```bash
-python scripts/build_context_pack.py .
-```
-
-Use the generated pack as the routing layer for the rest of the task.
+Use the V3 builder when available.
 
 Treat the pack as missing or stale when:
 
@@ -88,8 +102,12 @@ Default order:
 4. `ENTRYPOINTS.md`
 5. `AREAS.md`
 6. `SYMBOL_INDEX.md`
-7. `DIRECTORY_TREE.txt`
-8. `IMPORTANT_FILES.md`
+7. `TASK_ROUTING.md`
+8. `TOKEN_COUNTS.md`
+9. `IMPORT_GRAPH.md`
+10. `CHANGE_HOTSPOTS.md`
+11. `DIRECTORY_TREE.txt`
+12. `IMPORTANT_FILES.md`
 
 Do not load everything at once unless the task really needs it.
 
@@ -102,6 +120,12 @@ After reading the pack, identify:
 - likely entrypoints
 - likely tests
 - likely configuration files
+
+If the task is specific enough, run V3 query routing:
+
+```bash
+python scripts/build_context_pack_v3.py . --route-query "<task or feature>"
+```
 
 Then do targeted reads and scoped searches only in those areas.
 
@@ -116,9 +140,10 @@ When the user asks:
 Use this order:
 
 1. use the pack to identify likely folders, entrypoints, and symbols
-2. search only those likely folders first
-3. expand search only if the first pass is weak or contradictory
-4. say whether the answer came from the pack, scoped search, or direct file reads
+2. if available, run `--route-query` for the task phrase
+3. search only those likely folders first
+4. expand search only if the first pass is weak or contradictory
+5. say whether the answer came from the pack, query routing, scoped search, or direct file reads
 
 Do not imply the pack alone proves exact ownership. Treat it as the routing layer, then verify exact files with scoped search or direct reads.
 
@@ -169,6 +194,13 @@ After building, refreshing, or reusing the pack, report:
 - the likely files or folders for the current task, if one is known
 - the confidence boundary: working repo map, exact files still need to be read before editing
 
+If V3 query routing is used, also report:
+
+- the highest-ranked files for the query
+- why they ranked highly
+- which graph neighbors or co-change partners should be checked next
+- whether any heavy files should be delayed because of token cost
+
 ## Editing constraints
 
 - Never overwrite source files when generating context.
@@ -188,4 +220,4 @@ Before concluding, verify:
 - commands were extracted from real config where possible
 - entrypoints are plausible
 - the user-facing summary does not overclaim complete context awareness
-- exact file-location answers were verified with scoped search or direct reads when needed
+- exact file-location answers were verified with query routing, scoped search, or direct reads when needed

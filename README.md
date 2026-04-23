@@ -28,6 +28,16 @@ Instead of making the model rediscover the codebase on every task, generate and 
 
 That folder becomes a reusable navigation layer for future tasks.
 
+## What the context pack is and is not
+
+The pack gives the agent a **working repo map**:
+
+- folder ownership and likely subsystem boundaries
+- key docs, commands, configs, entrypoints, and important files
+- likely files for a feature, route, service, or domain concept
+
+It is not full line-by-line code understanding. The agent should still read exact files before editing behavior, and should say when an answer came from the pack, scoped search, or direct file reads.
+
 ## Output files
 
 The builder generates:
@@ -93,6 +103,10 @@ Examples:
 6. Make changes
 7. Refresh the pack if structure changed
 
+For exact questions like “where is onboarding?” or “which files own billing?”, use the pack as the routing layer first, then run scoped search in the likely folders. Avoid answering exact ownership from the pack alone unless the generated artifacts already prove it clearly.
+
+After structural edits, such as adding feature folders, moving entrypoints, changing commands, or updating architecture docs, refresh the pack before relying on it for the next task. After ordinary code edits, a stale check is usually enough.
+
 ## Why this is different from repo packers
 
 Repo packers are usually **snapshot exporters**. They are excellent for sending a repo into an LLM once.
@@ -121,6 +135,7 @@ This Skill makes those things explicit.
 
 - The provided builder uses deterministic heuristics, not a full compiler or language server.
 - Symbol extraction is best-effort and intentionally lightweight.
+- The pack improves file targeting but does not replace reading exact implementation files before edits.
 - For very large enterprise codebases, the best results come from combining this Skill with existing repo search/index tools.
 
 ## Best combination in practice

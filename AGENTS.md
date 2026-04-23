@@ -21,6 +21,19 @@ This pack should help answer:
 - which top-level folders own which responsibilities
 - which files are likely relevant to the current task
 
+## How this is triggered
+
+There are no custom slash commands.
+
+Use this flow when the user says things like:
+
+- “Understand this repo before making changes.”
+- “Build or refresh the repo context pack first.”
+- “Map the codebase, then tell me which files likely own auth.”
+- “Use the repo map first, then scoped search, then direct file reads.”
+
+If a task clearly requires repo understanding before editing, apply this flow even if the user does not name it explicitly.
+
 ## When to use this
 
 Use this flow when any of the following are true:
@@ -144,6 +157,17 @@ If the builder fails:
 - if retry still fails, use the existing pack only if it clearly still matches the repo
 - tell the user the pack may be stale
 - continue with scoped search inside likely folders
+
+## Expected user-visible output
+
+After building, refreshing, or reusing the pack, report:
+
+- whether the pack was generated, refreshed, reused, or may be stale
+- where the pack was written
+- the top-level ownership map
+- the key docs, commands, configs, and entrypoints
+- the likely files or folders for the current task, if one is known
+- the confidence boundary: working repo map, exact files still need to be read before editing
 
 ## Editing constraints
 

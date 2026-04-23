@@ -154,6 +154,64 @@ scripts/
   build_context_pack_v3.py
 ```
 
+## How to update after changes are pushed to `main`
+
+This repository is currently consumed as normal files, not as a packaged marketplace plugin, so updates from GitHub do **not** arrive automatically unless your install itself is a git checkout that tracks this repo.
+
+### Claude Code: installed as a git checkout
+
+If you cloned this repo directly into the skill directory, update it in place:
+
+```bash
+cd ~/.claude/skills/repository-context-engineer
+git pull origin main
+```
+
+Then restart Claude Code so it reloads the skill files.
+
+### Claude Code: installed by manually copying files
+
+If you copied the files into `~/.claude/skills/repository-context-engineer/`, pull the latest repo somewhere else and copy the updated files over again:
+
+```bash
+git clone https://github.com/Stijnus/repository-context-engineer-skill.git /tmp/repository-context-engineer-skill
+rm -rf ~/.claude/skills/repository-context-engineer
+mkdir -p ~/.claude/skills
+cp -R /tmp/repository-context-engineer-skill ~/.claude/skills/repository-context-engineer
+```
+
+Then restart Claude Code.
+
+If you already have a local clone, you can replace the first line with:
+
+```bash
+cd /path/to/repository-context-engineer-skill
+git pull origin main
+```
+
+and then copy the refreshed files into `~/.claude/skills/repository-context-engineer/`.
+
+### Codex: installed inside a target repository
+
+If you copied `AGENTS.md` and `scripts/` into a target repo for Codex, update those files from the latest `main` branch and commit them in that target repo:
+
+```bash
+cd /path/to/repository-context-engineer-skill
+git pull origin main
+
+cp AGENTS.md /path/to/target-repo/AGENTS.md
+cp -R scripts /path/to/target-repo/
+```
+
+After that, start a new Codex session in the target repo so it sees the updated guidance.
+
+### Recommended update workflow
+
+For the cleanest updates, prefer one of these patterns:
+
+- keep a real git clone in `~/.claude/skills/repository-context-engineer/` and use `git pull origin main`
+- or vendor the needed files into each target repo and refresh them when you want to adopt the latest version
+
 ## How to use it in practice
 
 ### There are no special slash commands

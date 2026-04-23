@@ -26,6 +26,56 @@ Preferred when you want **query-ranked context selection**:
 python scripts/build_context_pack_v3.py .
 ```
 
+## Updating the installed files
+
+This repo now includes updater scripts for both macOS/Linux and Windows.
+
+### Claude Code on macOS/Linux
+
+If the installed skill is itself a git checkout of this repo:
+
+```bash
+bash scripts/update_skill.sh --pull
+```
+
+If you want to sync from a different local checkout into the Claude skill install path:
+
+```bash
+bash scripts/update_skill.sh --pull --target ~/.claude/skills/repository-context-engineer
+```
+
+### Claude Code on Windows
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/update_skill.ps1 -Pull
+```
+
+or, for a different target path:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/update_skill.ps1 -Pull -Target "$HOME\.claude\skills\repository-context-engineer"
+```
+
+### Codex target repository
+
+```bash
+bash scripts/update_skill.sh --pull --mode codex --target /path/to/target-repo
+```
+
+On Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/update_skill.ps1 -Pull -Mode codex -Target "C:\path\to\target-repo"
+```
+
+By default the updater scripts create a backup under:
+
+```text
+.repository-context-engineer-backups/
+```
+
+inside the target before overwriting managed files.
+
 ## What V3 adds
 
 V3 adds several files intended to reduce repeated search and token waste:

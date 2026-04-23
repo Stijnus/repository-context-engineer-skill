@@ -11,7 +11,7 @@ This repo now ships the two instruction surfaces you actually want:
 - **Claude Code**: `SKILL.md`
 - **Codex**: `AGENTS.md`
 
-Both use the same builder script and the same generated project context pack under:
+Both use the same generated project context pack under:
 
 ```text
 .claude/project-context/
@@ -54,28 +54,67 @@ The pack gives the agent a **working repo map**:
 
 It is not full line-by-line code understanding. The agent should still read exact files before editing behavior, and should say when an answer came from the pack, scoped search, or direct file reads.
 
-## Output files
-
-The builder generates:
-
-- `OVERVIEW.md`
-- `STACK.md`
-- `COMMANDS.md`
-- `ENTRYPOINTS.md`
-- `AREAS.md`
-- `IMPORTANT_FILES.md`
-- `SYMBOL_INDEX.md`
-- `DIRECTORY_TREE.txt`
-- `FILES.csv`
-- `MANIFEST.json`
-
 ## Files in this repo
 
 - `SKILL.md` — Claude Code version
 - `AGENTS.md` — Codex version
-- `scripts/build_context_pack.py` — shared builder
+- `scripts/build_context_pack.py` — stable V2 builder
+- `scripts/build_context_pack_v3.py` — V3 graph-ranked builder
 - `examples/settings.snippets.jsonc` — optional Claude Code hook example
 - `USAGE.md` — practical examples, commands, and expected output
+
+## Recommended versions
+
+### V2
+
+Use V2 if you want the simpler, stable builder:
+
+```bash
+python scripts/build_context_pack.py .
+```
+
+### V3
+
+Use V3 if you want **query-ranked context selection** and lower search churn:
+
+```bash
+python scripts/build_context_pack_v3.py .
+```
+
+V3 adds:
+
+- `IMPORT_GRAPH.md`
+- `TOKEN_COUNTS.md`
+- `TASK_ROUTING.md`
+- `CHANGE_HOTSPOTS.md`
+- `STALENESS.md`
+- optional `QUERY_CONTEXT.md`
+- optional `QUERY_RESULTS.json`
+
+## Preferred V3 commands
+
+### Build the V3 pack
+
+```bash
+python scripts/build_context_pack_v3.py .
+```
+
+### Check whether the pack is stale
+
+```bash
+python scripts/build_context_pack_v3.py . --check-stale
+```
+
+### Rank likely files for a specific task
+
+```bash
+python scripts/build_context_pack_v3.py . --route-query "billing flow"
+```
+
+That last command is the important V3 addition. It writes a ranked file list for the query into:
+
+- `.claude/project-context/QUERY_CONTEXT.md`
+- `.claude/project-context/QUERY_RESULTS.json`
 
 ## Install for Claude Code
 
@@ -89,6 +128,7 @@ Install into a project like this:
       README.md
       scripts/
         build_context_pack.py
+        build_context_pack_v3.py
       examples/
         settings.snippets.jsonc
 ```
@@ -111,15 +151,8 @@ Codex reads `AGENTS.md`, so place these files in the target repository:
 AGENTS.md
 scripts/
   build_context_pack.py
+  build_context_pack_v3.py
 ```
-
-The included `AGENTS.md` assumes the builder lives at:
-
-```text
-scripts/build_context_pack.py
-```
-
-If you place it somewhere else, update the command inside `AGENTS.md`.
 
 ## How to use it in practice
 
@@ -133,48 +166,11 @@ Use normal prompts such as:
 - “Build or refresh the repo context pack first.”
 - “Map the codebase, then tell me which files likely own auth.”
 - “Use the repo map first, then scoped search, then direct file reads.”
+- “Run V3 query routing for billing and tell me the top files first.”
 
 For Claude Code, `SKILL.md` tells Claude when to apply this flow.
 
 For Codex, `AGENTS.md` tells Codex when to apply this flow.
-
-### Manual builder commands
-
-If you want to run the builder directly yourself, use one of these:
-
-**Codex / generic repo layout**
-
-```bash
-python scripts/build_context_pack.py .
-```
-
-**Claude Code project-local skill install**
-
-```bash
-python .claude/skills/repository-context-engineer/scripts/build_context_pack.py .
-```
-
-**Claude Code global skill install**
-
-Adjust the path to wherever you installed the skill globally, then run:
-
-```bash
-python /path/to/repository-context-engineer/scripts/build_context_pack.py .
-```
-
-### Shared workflow
-
-1. Check whether `.claude/project-context/` exists.
-2. If missing or stale, run the builder.
-3. Read the generated pack first.
-4. Route the task to the relevant subsystem.
-5. Read only the likely source files.
-6. Make changes.
-7. Refresh the pack if structure changed.
-
-For exact questions like “where is onboarding?” or “which files own billing?”, use the pack as the routing layer first, then run scoped search in the likely folders. Avoid answering exact ownership from the pack alone unless the generated artifacts already prove it clearly.
-
-After structural edits, such as adding feature folders, moving entrypoints, changing commands, or updating architecture docs, refresh the pack before relying on it for the next task. After ordinary code edits, a stale check is usually enough.
 
 ## What to expect from the agent
 
@@ -187,11 +183,12 @@ After the package is used correctly, the agent should usually tell you:
 - the most likely files or folders for your task
 - the confidence boundary: it has a **working repo map**, not full line-by-line memory
 
-Before editing behavior, the agent should still read:
+With V3 query routing, the agent should also be able to tell you:
 
-- the exact implementation files
-- nearby tests
-- nearby configs if they affect runtime or build behavior
+- which files were ranked highest for the query
+- why those files ranked highly
+- which import neighbors or co-change partners should be checked next
+- which heavy files should be delayed because they cost too many tokens
 
 ## What not to expect
 
@@ -227,30 +224,15 @@ Embeddings and semantic search help find relevant files, but they do not inheren
 
 This package makes those things explicit.
 
-## Limitations
+## V3 design goal
 
-- The provided builder uses deterministic heuristics, not a full compiler or language server.
-- Symbol extraction is best-effort and intentionally lightweight.
-- The pack improves file targeting but does not replace reading exact implementation files before edits.
-- For very large enterprise codebases, the best results come from combining this package with existing repo search/index tools.
+V3 is the first version that moves beyond a static repo map and toward **task-specific context concentration**.
 
-## Best combination in practice
+The idea is:
 
-For the strongest setup:
+1. keep a reusable global repo map
+2. build graph and hotspot signals once
+3. route the current query to the smallest high-signal file set
+4. read exact files only after ranking them
 
-1. use `CLAUDE.md` for Claude Code project memory when applicable
-2. use `SKILL.md` for Claude Code skill packaging
-3. use `AGENTS.md` for Codex repo guidance
-4. share the same generated `.claude/project-context/` pack across both
-5. use native repo search/index tools for precise retrieval
-
-## Good next step
-
-A strong v2 would also:
-
-- read `.gitignore` more precisely
-- use Tree-sitter when available
-- build area-specific maps per package/app
-- track staleness from git changes
-- emit task-routing hints based on natural-language intents
-- optionally generate a shorter Codex-first `AGENTS.md` map that points into the full pack
+That is the practical path to reducing repeated search loops and token waste.

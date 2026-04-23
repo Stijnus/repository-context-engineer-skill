@@ -41,6 +41,9 @@ DEFAULT_IGNORE_DIRS = {
     "Pods",
     "DerivedData",
     "__pycache__",
+}
+
+DEFAULT_IGNORE_PATH_PREFIXES = {
     ".claude/project-context",
 }
 
@@ -105,17 +108,36 @@ def load_text(path: Path) -> str | None:
 
 def walk_files(root: Path) -> list[FileInfo]:
     results: list[FileInfo] = []
+
+    def is_ignored_path(rel_path: str) -> bool:
+        return any(
+            rel_path == prefix or rel_path.startswith(f"{prefix}/")
+            for prefix in DEFAULT_IGNORE_PATH_PREFIXES
+        )
+
     for dirpath, dirnames, filenames in os.walk(root):
         rel_dir = os.path.relpath(dirpath, root)
         parts = [] if rel_dir == "." else rel_dir.split(os.sep)
-        dirnames[:] = [d for d in dirnames if d not in DEFAULT_IGNORE_DIRS and not d.startswith(".DS_")]
+        rel_dir_posix = "." if rel_dir == "." else Path(rel_dir).as_posix()
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in DEFAULT_IGNORE_DIRS
+            and not d.startswith(".DS_")
+            and not is_ignored_path(d if rel_dir_posix == "." else f"{rel_dir_posix}/{d}")
+        ]
         if any(part in DEFAULT_IGNORE_DIRS for part in parts):
+            dirnames[:] = []
+            continue
+        if rel_dir_posix != "." and is_ignored_path(rel_dir_posix):
             dirnames[:] = []
             continue
 
         for filename in filenames:
             path = Path(dirpath) / filename
             rel = path.relative_to(root).as_posix()
+            if is_ignored_path(rel):
+                continue
             if any(seg in DEFAULT_IGNORE_DIRS for seg in rel.split("/")):
                 continue
             try:

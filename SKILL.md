@@ -10,6 +10,32 @@ This Skill exists to reduce wasteful repo-wide searching and improve code change
 
 The goal is **not** to dump the whole repo into context. The goal is to create and maintain a **project context pack** under `.claude/project-context/` that acts as reusable operating knowledge for future tasks.
 
+## Context boundary
+
+This Skill gives a **working repo map**, not complete code memory.
+
+After using it, you should know:
+
+- the top-level folders and likely ownership boundaries
+- the key docs, commands, configs, entrypoints, and golden files
+- the likely files or folders for a feature, route, service, or subsystem
+- the project conventions that should guide edits
+
+Do not claim full line-by-line understanding of the repo. Before editing behavior, read the exact files you will change and any adjacent tests/configs.
+
+## How users trigger this Skill
+
+There are no custom slash commands.
+
+Users trigger this Skill with ordinary prompts such as:
+
+- “Understand this repo before making changes.”
+- “Build or refresh the project context pack first.”
+- “Map the codebase, then tell me which files likely own billing.”
+- “Use the repo map first, then scoped search, then direct file reads.”
+
+If the task clearly requires repo understanding before editing, activate this Skill even if the user does not name it explicitly.
+
 ## When to use this Skill
 
 Use this Skill proactively when any of the following are true:
@@ -35,6 +61,17 @@ Create a small set of durable context artifacts that answer these questions quic
 5. Which top-level areas own which responsibilities?
 6. Where are the important symbols and routes defined?
 7. Which files are most likely relevant to the current task?
+
+## Required user-facing output after building or refreshing
+
+After building or refreshing the pack, summarize:
+
+- where the pack was written
+- whether it was generated, refreshed, reused, or stale
+- the top-level folder ownership map
+- the key docs and golden files
+- likely files for the current task, if a task is known
+- the confidence boundary: "working repo map, exact files still need to be read before editing"
 
 ## Core operating rule
 
@@ -105,7 +142,18 @@ After reading the pack, identify:
 
 Then do targeted reads/searches only in those areas.
 
-### 5. State the file hypothesis before editing
+### 5. Answer exact location questions with scoped lookup
+
+When the user asks "where is X?", "which files own X?", or "where should we change X?":
+
+1. Use the pack to identify likely folders, routes, entrypoints, and symbols.
+2. Search only the likely folders first.
+3. Expand search only if the first pass is weak or contradictory.
+4. State whether the answer came from the context pack, scoped search, or direct file reads.
+
+Do not imply the pack alone proves exact ownership. Treat it as the routing layer, then verify exact files with targeted search or reads.
+
+### 6. State the file hypothesis before editing
 
 Before making code changes, explicitly form a short working hypothesis in your reasoning or notes:
 
@@ -115,7 +163,7 @@ Before making code changes, explicitly form a short working hypothesis in your r
 
 If the hypothesis is weak, improve it with targeted reads rather than broad repo scans.
 
-### 6. Update the context pack after structural changes
+### 7. Update the context pack after changes
 
 Re-run the builder after:
 
@@ -124,6 +172,20 @@ Re-run the builder after:
 - moving entrypoints
 - adding major commands/scripts
 - adding new route groups or API surfaces
+- adding, deleting, or moving feature folders
+- changing architecture docs or project conventions
+
+After normal code edits that do not change structure, do not rebuild automatically unless the next task depends on an updated map. If available, prefer a stale-checking command or metadata check before rebuilding.
+
+### 8. Handle builder failures honestly
+
+If the builder fails:
+
+- Do not say the pack was refreshed.
+- Retry once if the failure looks transient, such as a file lock or interrupted write.
+- If retry still fails, read the existing pack only if it exists and clearly matches the current repo.
+- Tell the user the pack may be stale and continue with scoped search inside likely folders.
+- If the script path is wrong because the skill is installed globally, adapt the path and rerun.
 
 ## Editing constraints
 
@@ -132,6 +194,7 @@ Re-run the builder after:
 - Keep the pack concise and navigable.
 - Prefer deterministic extraction over speculative summaries.
 - If a signal is uncertain, label it as probable rather than authoritative.
+- Do not commit generated context artifacts unless the user explicitly wants them checked in.
 
 ## What the context pack should contain
 
@@ -165,6 +228,8 @@ Avoid these behaviors:
 - assuming the framework from one file without confirming through manifests/config
 - editing a file before understanding the owning subsystem and adjacent tests
 - regenerating the pack repeatedly when nothing structural changed
+- telling the user you have complete repo awareness after only building the pack
+- answering exact ownership questions from the pack alone when a scoped search is needed
 
 ## Suggested user-facing phrasing when this Skill activates
 
@@ -173,6 +238,8 @@ Use concise status language such as:
 - “I’m mapping the repo first so I can target the right subsystem instead of searching blindly.”
 - “I found the likely entrypoints and command surface; now I’m narrowing to the files that own this feature.”
 - “The context pack is missing, so I’m generating a reusable project map before making changes.”
+- “I now have a working repo map, not full line-by-line memory. I’ll still read exact files before editing.”
+- “This exact file list came from the pack plus scoped search in the likely subsystem.”
 
 ## If the repo already has strong project memory
 
@@ -194,9 +261,12 @@ Before concluding, verify:
 - entrypoints are plausible
 - symbol index is readable and not bloated
 - no source files were changed accidentally
+- user-facing summary does not overclaim complete context awareness
+- exact file-location answers were verified with scoped search or direct reads when needed
 
 ## Supporting files
 
 - Builder script: `scripts/build_context_pack.py`
 - Installation/usage guide: `README.md`
+- Practical examples and commands: `USAGE.md`
 - Optional example hook snippets: `examples/settings.snippets.jsonc`

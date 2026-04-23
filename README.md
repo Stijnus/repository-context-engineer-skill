@@ -1,8 +1,23 @@
-# Repository Context Engineer Skill
+# Repository Context Engineer
 
-A Claude Code Skill for **persistent repository understanding**.
+A repository-understanding package for **Claude Code and Codex**.
 
-This Skill is designed for the exact problem you described: agents spending too much time repeatedly searching, grepping, and reading random files because they do not have a durable understanding of the codebase.
+This project is designed for the exact problem you described: agents spending too much time repeatedly searching, grepping, and reading random files because they do not have a durable understanding of the codebase.
+
+## What this package targets
+
+This repo now ships the two instruction surfaces you actually want:
+
+- **Claude Code**: `SKILL.md`
+- **Codex**: `AGENTS.md`
+
+Both use the same builder script and the same generated project context pack under:
+
+```text
+.claude/project-context/
+```
+
+That means Claude Code and Codex can share the same durable repo map instead of rediscovering the project from scratch on every task.
 
 ## What problem this solves
 
@@ -11,12 +26,13 @@ Most current approaches improve only one part of the problem:
 - **Repo packers** like Repomix, GitIngest, and Code2Prompt are useful for one-shot prompt creation.
 - **Indexers/retrievers** like Cursor and Sourcegraph improve search and retrieval.
 - **Claude Code memory** (`CLAUDE.md`, auto-memory, subagents) helps with instructions and recurring knowledge.
+- **Codex repo guidance** through `AGENTS.md` helps with navigation, commands, and project conventions.
 
 But those do not fully solve the missing middle layer:
 
 > a reusable, project-specific operating model that tells the agent what the repo is, how it is organized, where execution starts, which commands matter, and which folders own which responsibilities.
 
-This Skill adds that middle layer by generating a **project context pack** inside the repository.
+This package adds that middle layer by generating a **project context pack** inside the repository.
 
 ## Core idea
 
@@ -27,6 +43,16 @@ Instead of making the model rediscover the codebase on every task, generate and 
 ```
 
 That folder becomes a reusable navigation layer for future tasks.
+
+## What the context pack is and is not
+
+The pack gives the agent a **working repo map**:
+
+- folder ownership and likely subsystem boundaries
+- key docs, commands, configs, entrypoints, and important files
+- likely files for a feature, route, service, or domain concept
+
+It is not full line-by-line code understanding. The agent should still read exact files before editing behavior, and should say when an answer came from the pack, scoped search, or direct file reads.
 
 ## Output files
 
@@ -40,13 +66,20 @@ The builder generates:
 - `IMPORTANT_FILES.md`
 - `SYMBOL_INDEX.md`
 - `DIRECTORY_TREE.txt`
+- `FILES.csv`
 - `MANIFEST.json`
 
-## Install
+## Files in this repo
 
-### Project-local install
+- `SKILL.md` — Claude Code version
+- `AGENTS.md` — Codex version
+- `scripts/build_context_pack.py` — shared builder
+- `examples/settings.snippets.jsonc` — optional Claude Code hook example
+- `USAGE.md` — practical examples, commands, and expected output
 
-Create this folder structure in your repository:
+## Install for Claude Code
+
+Install into a project like this:
 
 ```text
 .claude/
@@ -62,48 +95,125 @@ Create this folder structure in your repository:
 
 Then restart Claude Code.
 
-### Personal install
-
-Put the same folder under:
+You can also install it globally under:
 
 ```text
 ~/.claude/skills/repository-context-engineer/
 ```
 
-Then adjust the script path in `SKILL.md` if you want the skill to write into the current project from a global install.
+If you do that, adjust the script path in `SKILL.md` if needed.
 
-## Use
+## Install for Codex
 
-Ask Claude Code to work in a repo as normal. The Skill should trigger automatically when the task suggests that repo understanding is required.
+Codex reads `AGENTS.md`, so place these files in the target repository:
 
-Examples:
+```text
+AGENTS.md
+scripts/
+  build_context_pack.py
+```
 
-- “Find where auth is implemented and add refresh token support.”
-- “This monorepo is messy; understand it first and then fix the billing flow.”
-- “Before changing anything, map the repo and tell me which files own the API layer.”
-- “Stop searching blindly and build project context first.”
+The included `AGENTS.md` assumes the builder lives at:
 
-## Suggested workflow
+```text
+scripts/build_context_pack.py
+```
 
-1. Check for `.claude/project-context/`
-2. If missing/stale, run the builder
-3. Read the generated pack first
-4. Route the task to the relevant subsystem
-5. Read only the likely source files
-6. Make changes
-7. Refresh the pack if structure changed
+If you place it somewhere else, update the command inside `AGENTS.md`.
+
+## How to use it in practice
+
+### There are no special slash commands
+
+This package does **not** add custom slash commands.
+
+Use normal prompts such as:
+
+- “Understand this repo before making changes.”
+- “Build or refresh the repo context pack first.”
+- “Map the codebase, then tell me which files likely own auth.”
+- “Use the repo map first, then scoped search, then direct file reads.”
+
+For Claude Code, `SKILL.md` tells Claude when to apply this flow.
+
+For Codex, `AGENTS.md` tells Codex when to apply this flow.
+
+### Manual builder commands
+
+If you want to run the builder directly yourself, use one of these:
+
+**Codex / generic repo layout**
+
+```bash
+python scripts/build_context_pack.py .
+```
+
+**Claude Code project-local skill install**
+
+```bash
+python .claude/skills/repository-context-engineer/scripts/build_context_pack.py .
+```
+
+**Claude Code global skill install**
+
+Adjust the path to wherever you installed the skill globally, then run:
+
+```bash
+python /path/to/repository-context-engineer/scripts/build_context_pack.py .
+```
+
+### Shared workflow
+
+1. Check whether `.claude/project-context/` exists.
+2. If missing or stale, run the builder.
+3. Read the generated pack first.
+4. Route the task to the relevant subsystem.
+5. Read only the likely source files.
+6. Make changes.
+7. Refresh the pack if structure changed.
+
+For exact questions like “where is onboarding?” or “which files own billing?”, use the pack as the routing layer first, then run scoped search in the likely folders. Avoid answering exact ownership from the pack alone unless the generated artifacts already prove it clearly.
+
+After structural edits, such as adding feature folders, moving entrypoints, changing commands, or updating architecture docs, refresh the pack before relying on it for the next task. After ordinary code edits, a stale check is usually enough.
+
+## What to expect from the agent
+
+After the package is used correctly, the agent should usually tell you:
+
+- whether the context pack was **generated**, **refreshed**, **reused**, or is likely **stale**
+- where the pack was written
+- the top-level ownership map of the repo
+- the key docs, commands, configs, and entrypoints
+- the most likely files or folders for your task
+- the confidence boundary: it has a **working repo map**, not full line-by-line memory
+
+Before editing behavior, the agent should still read:
+
+- the exact implementation files
+- nearby tests
+- nearby configs if they affect runtime or build behavior
+
+## What not to expect
+
+Do not expect this package to:
+
+- instantly know exact file ownership without verification
+- replace direct file reads before behavior edits
+- behave like a full language server or compiler
+- automatically commit generated `.claude/project-context/` output unless you explicitly want that
 
 ## Why this is different from repo packers
 
 Repo packers are usually **snapshot exporters**. They are excellent for sending a repo into an LLM once.
 
-This Skill is instead a **persistent repo operating layer**:
+This package is instead a **persistent repo operating layer**:
 
 - smaller than a full repo dump
 - cheaper to load repeatedly
 - targeted to agent navigation
 - durable across tasks
 - easy to keep up to date
+- reusable by both Claude Code and Codex
 
 ## Why this is different from semantic indexing alone
 
@@ -115,29 +225,32 @@ Embeddings and semantic search help find relevant files, but they do not inheren
 - which files deserve to be read first
 - which symbols form the public surface area of the project
 
-This Skill makes those things explicit.
+This package makes those things explicit.
 
 ## Limitations
 
 - The provided builder uses deterministic heuristics, not a full compiler or language server.
 - Symbol extraction is best-effort and intentionally lightweight.
-- For very large enterprise codebases, the best results come from combining this Skill with existing repo search/index tools.
+- The pack improves file targeting but does not replace reading exact implementation files before edits.
+- For very large enterprise codebases, the best results come from combining this package with existing repo search/index tools.
 
 ## Best combination in practice
 
-For the strongest setup, combine:
+For the strongest setup:
 
-1. `CLAUDE.md` for project conventions and workflow
-2. this Skill for durable repo structure understanding
-3. native search/index tools for precise retrieval
-4. optional subagents for specialized tasks
+1. use `CLAUDE.md` for Claude Code project memory when applicable
+2. use `SKILL.md` for Claude Code skill packaging
+3. use `AGENTS.md` for Codex repo guidance
+4. share the same generated `.claude/project-context/` pack across both
+5. use native repo search/index tools for precise retrieval
 
 ## Good next step
 
-If you want, the next iteration should be a **v2 hybrid skill** that also:
+A strong v2 would also:
 
-- reads `.gitignore` more precisely
-- uses Tree-sitter when available
-- builds area-specific maps per package/app
-- tracks staleness from git changes
-- emits task-routing hints based on natural-language intents
+- read `.gitignore` more precisely
+- use Tree-sitter when available
+- build area-specific maps per package/app
+- track staleness from git changes
+- emit task-routing hints based on natural-language intents
+- optionally generate a shorter Codex-first `AGENTS.md` map that points into the full pack

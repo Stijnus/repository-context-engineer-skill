@@ -60,6 +60,8 @@ It is not full line-by-line code understanding. The agent should still read exac
 - `AGENTS.md` — Codex version
 - `scripts/build_context_pack.py` — stable V2 builder
 - `scripts/build_context_pack_v3.py` — V3 graph-ranked builder
+- `scripts/update_skill.sh` — macOS/Linux updater for Claude installs and Codex-target sync
+- `scripts/update_skill.ps1` — Windows updater for Claude installs and Codex-target sync
 - `examples/settings.snippets.jsonc` — optional Claude Code hook example
 - `USAGE.md` — practical examples, commands, and expected output
 
@@ -129,6 +131,8 @@ Install into a project like this:
       scripts/
         build_context_pack.py
         build_context_pack_v3.py
+        update_skill.sh
+        update_skill.ps1
       examples/
         settings.snippets.jsonc
 ```
@@ -152,65 +156,82 @@ AGENTS.md
 scripts/
   build_context_pack.py
   build_context_pack_v3.py
+  update_skill.sh
+  update_skill.ps1
 ```
 
 ## How to update after changes are pushed to `main`
 
-This repository is currently consumed as normal files, not as a packaged marketplace plugin, so updates from GitHub do **not** arrive automatically unless your install itself is a git checkout that tracks this repo.
+This repository now includes updater scripts for both macOS/Linux and Windows.
 
-### Claude Code: installed as a git checkout
+They can do two things:
 
-If you cloned this repo directly into the skill directory, update it in place:
+- pull the latest changes from `origin/main` in a local checkout
+- sync the managed files into either a Claude Code skill install or a Codex target repository
 
-```bash
-cd ~/.claude/skills/repository-context-engineer
-git pull origin main
+By default the scripts create a file-level backup under:
+
+```text
+.repository-context-engineer-backups/
 ```
 
-Then restart Claude Code so it reloads the skill files.
+inside the target before overwriting managed files.
 
-### Claude Code: installed by manually copying files
+### Claude Code on macOS/Linux
 
-If you copied the files into `~/.claude/skills/repository-context-engineer/`, pull the latest repo somewhere else and copy the updated files over again:
-
-```bash
-git clone https://github.com/Stijnus/repository-context-engineer-skill.git /tmp/repository-context-engineer-skill
-rm -rf ~/.claude/skills/repository-context-engineer
-mkdir -p ~/.claude/skills
-cp -R /tmp/repository-context-engineer-skill ~/.claude/skills/repository-context-engineer
-```
-
-Then restart Claude Code.
-
-If you already have a local clone, you can replace the first line with:
+If your installed skill directory is itself a git checkout of this repo, run:
 
 ```bash
-cd /path/to/repository-context-engineer-skill
-git pull origin main
+bash scripts/update_skill.sh --pull
 ```
 
-and then copy the refreshed files into `~/.claude/skills/repository-context-engineer/`.
-
-### Codex: installed inside a target repository
-
-If you copied `AGENTS.md` and `scripts/` into a target repo for Codex, update those files from the latest `main` branch and commit them in that target repo:
+If you want to update a different Claude skill install from another local clone of this repo, run:
 
 ```bash
-cd /path/to/repository-context-engineer-skill
-git pull origin main
-
-cp AGENTS.md /path/to/target-repo/AGENTS.md
-cp -R scripts /path/to/target-repo/
+bash scripts/update_skill.sh --pull --target ~/.claude/skills/repository-context-engineer
 ```
 
-After that, start a new Codex session in the target repo so it sees the updated guidance.
+### Claude Code on Windows
 
-### Recommended update workflow
+If your installed skill directory is itself a git checkout of this repo, run:
 
-For the cleanest updates, prefer one of these patterns:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/update_skill.ps1 -Pull
+```
 
-- keep a real git clone in `~/.claude/skills/repository-context-engineer/` and use `git pull origin main`
-- or vendor the needed files into each target repo and refresh them when you want to adopt the latest version
+If you want to update a different Claude skill install from another local clone of this repo, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/update_skill.ps1 -Pull -Target "$HOME\.claude\skills\repository-context-engineer"
+```
+
+### Codex target repository
+
+To refresh the vendored Codex files in a target repository from a local checkout of this repo:
+
+```bash
+bash scripts/update_skill.sh --pull --mode codex --target /path/to/target-repo
+```
+
+On Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/update_skill.ps1 -Pull -Mode codex -Target "C:\path\to\target-repo"
+```
+
+That updates only the managed Codex files:
+
+- `AGENTS.md`
+- `scripts/build_context_pack.py`
+- `scripts/build_context_pack_v3.py`
+- `scripts/update_skill.sh`
+- `scripts/update_skill.ps1`
+
+### Manual fallback
+
+You can still update manually with `git pull` and file copies, but the updater scripts are now the recommended path.
+
+After any update, restart Claude Code or start a new Codex session so the new instructions are loaded.
 
 ## How to use it in practice
 

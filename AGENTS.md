@@ -1,223 +1,119 @@
 # Repository Context Engineer
 
-Use this repository guidance when Codex is working in an unfamiliar or non-trivial codebase and the task does not already name the exact files to change.
+Codex guidance for reducing wasteful repo-wide searching. Build and reuse a durable project context pack under `.claude/project-context/` before broad search. The pack is a working repo map, not line-by-line code memory — still read exact files before editing behavior.
 
-## Purpose
+## When to use
 
-Build or reuse a **working repo map** before broad searching.
+Apply when any are true, even if the user does not name this flow:
 
-The goal is not full line-by-line code memory. The goal is to create a durable navigation layer under:
-
-```text
-.claude/project-context/
-```
-
-This pack should help answer:
-
-- what kind of project this is
-- how the repo is structured
-- which files are likely entrypoints and key configs
-- which commands matter for build, test, lint, and run
-- which top-level folders own which responsibilities
-- which files are likely relevant to the current task
-
-## How this is triggered
-
-There are no custom slash commands.
-
-Use this flow when the user says things like:
-
-- “Understand this repo before making changes.”
-- “Build or refresh the repo context pack first.”
-- “Map the codebase, then tell me which files likely own auth.”
-- “Use the repo map first, then scoped search, then direct file reads.”
-- “Run V3 query routing for billing and tell me the top files first.”
-
-If a task clearly requires repo understanding before editing, apply this flow even if the user does not name it explicitly.
-
-## Preferred commands
-
-Prefer V3 if it exists:
-
-```bash
-python scripts/build_context_pack_v3.py .
-python scripts/build_context_pack_v3.py . --check-stale
-python scripts/build_context_pack_v3.py . --route-query "billing flow"
-```
-
-Fallback only if V3 is unavailable:
-
-```bash
-python scripts/build_context_pack.py .
-```
-
-## When to use this
-
-Use this flow when any of the following are true:
-
-- the repository is unfamiliar
+- the repository is unfamiliar or spans multiple apps/services/packages
 - the task references a feature or subsystem but not exact files
 - repeated grep/find/read cycles are getting expensive
-- the task spans multiple folders, packages, services, or apps
-- you need a better file hypothesis before editing
+- the codebase lacks clear project memory
 
-Do not use this flow for tiny one-file edits when the correct file is already known.
+Do not use for tiny one-file edits when the correct file is already known.
 
-## Core workflow
+## Trigger phrases
 
-### 1. Check for an existing context pack
+- "Understand this repo before making changes."
+- "Build or refresh the repo context pack first."
+- "Map the codebase, then tell me which files likely own `<X>`."
+- "Use the repo map first, then scoped search, then direct file reads."
+- "Run V3 query routing for `<X>` and tell me the top files first."
 
-Look for:
+## Decision flow
 
-- `.claude/project-context/OVERVIEW.md`
-- `.claude/project-context/STACK.md`
-- `.claude/project-context/COMMANDS.md`
-- `.claude/project-context/ENTRYPOINTS.md`
-- `.claude/project-context/AREAS.md`
-- `.claude/project-context/SYMBOL_INDEX.md`
-- `.claude/project-context/TASK_ROUTING.md`
-- `.claude/project-context/TOKEN_COUNTS.md`
-- `.claude/project-context/IMPORT_GRAPH.md`
+1. Is `.claude/project-context/` present?
+   - No → build the pack.
+   - Yes → run `--check-stale`. If STALE or the needed subsystem is missing, refresh. Otherwise reuse.
+2. Does `scripts/build_context_pack_v3.py` exist?
+   - Yes → prefer V3 for build, stale-check, and `--route-query`.
+   - No → fall back to V2 (`scripts/build_context_pack.py`).
+3. Does `MANIFEST.json` show `builder_version` starting with `2.` while V3 is available? → refresh with V3.
 
-If the pack exists and still appears usable, read it first before broad search.
+Treat the pack as stale when repo structure changed, a new app/service/package appeared, or the current task is in a subsystem absent from the pack.
 
-### 2. Build or refresh the pack if needed
+## Quick reference
 
-Use the V3 builder when available.
+| Goal | Command |
+|---|---|
+| Build (V3, preferred) | `python scripts/build_context_pack_v3.py .` |
+| Stale check | `python scripts/build_context_pack_v3.py . --check-stale` |
+| Rank files for a task | `python scripts/build_context_pack_v3.py . --route-query "<task>"` |
+| Fallback build (V2) | `python scripts/build_context_pack.py .` |
 
-Treat the pack as missing or stale when:
+## Layered read order
 
-- `.claude/project-context/` does not exist
-- the repository structure changed significantly
-- the needed subsystem is missing from the pack
-- the pack predates a major refactor or a new app/service/package
+Read pack files on demand, not all at once:
 
-### 3. Read the pack in layers
+1. `OVERVIEW.md`, `STACK.md`, `COMMANDS.md`
+2. `ENTRYPOINTS.md`, `AREAS.md`
+3. `SYMBOL_INDEX.md`, `TASK_ROUTING.md`
+4. `TOKEN_COUNTS.md`, `IMPORT_GRAPH.md`, `CHANGE_HOTSPOTS.md`
+5. `DIRECTORY_TREE.txt`, `IMPORTANT_FILES.md`
 
-Default order:
+If `--route-query` was run, also read `QUERY_CONTEXT.md` and prefer its ranked files over broad search.
 
-1. `OVERVIEW.md`
-2. `STACK.md`
-3. `COMMANDS.md`
-4. `ENTRYPOINTS.md`
-5. `AREAS.md`
-6. `SYMBOL_INDEX.md`
-7. `TASK_ROUTING.md`
-8. `TOKEN_COUNTS.md`
-9. `IMPORT_GRAPH.md`
-10. `CHANGE_HOTSPOTS.md`
-11. `DIRECTORY_TREE.txt`
-12. `IMPORTANT_FILES.md`
+## Exact-location questions
 
-Do not load everything at once unless the task really needs it.
+For "where is X?", "which files own X?", "where should I change X?":
 
-### 4. Route the task before reading code
+1. Use the pack to narrow to likely folders, entrypoints, symbols.
+2. Run `--route-query "<exact task phrase>"` when V3 is available.
+3. Search only those folders first; expand only if the first pass is weak.
+4. Verify with direct reads before editing behavior.
+5. State which layer produced the answer: pack, routing, scoped search, or direct read.
 
-After reading the pack, identify:
+Do not imply the pack alone proves exact ownership.
 
-- likely subsystem
-- likely owning folder(s)
-- likely entrypoints
-- likely tests
-- likely configuration files
-
-If the task is specific enough, run V3 query routing:
-
-```bash
-python scripts/build_context_pack_v3.py . --route-query "<task or feature>"
-```
-
-Then do targeted reads and scoped searches only in those areas.
-
-### 5. Answer exact location questions with scoped lookup
-
-When the user asks:
-
-- where is X?
-- which files own X?
-- where should we change X?
-
-Use this order:
-
-1. use the pack to identify likely folders, entrypoints, and symbols
-2. if available, run `--route-query` for the task phrase
-3. search only those likely folders first
-4. expand search only if the first pass is weak or contradictory
-5. say whether the answer came from the pack, query routing, scoped search, or direct file reads
-
-Do not imply the pack alone proves exact ownership. Treat it as the routing layer, then verify exact files with scoped search or direct reads.
-
-### 6. Read exact files before editing behavior
-
-Before code changes, form a short file hypothesis:
-
-- which files likely need changes
-- why those files were selected
-- what adjacent tests/configs may need updates
-
-Then read the exact implementation files before editing.
-
-A built pack means you have a **working repo map**, not complete code memory.
-
-### 7. Refresh after structural changes
-
-Rebuild the pack after changes such as:
-
-- adding new apps/services/packages
-- renaming important folders
-- moving entrypoints
-- adding major commands/scripts
-- adding new route groups or API surfaces
-- adding, deleting, or moving feature folders
-- changing architecture docs or project conventions
-
-After normal code edits, do not rebuild automatically unless the next task depends on an updated map.
-
-### 8. Handle builder failures honestly
-
-If the builder fails:
-
-- do not say the pack was refreshed
-- retry once if the failure looks transient
-- if retry still fails, use the existing pack only if it clearly still matches the repo
-- tell the user the pack may be stale
-- continue with scoped search inside likely folders
-
-## Expected user-visible output
+## Output contract
 
 After building, refreshing, or reusing the pack, report:
 
-- whether the pack was generated, refreshed, reused, or may be stale
-- where the pack was written
-- the top-level ownership map
-- the key docs, commands, configs, and entrypoints
-- the likely files or folders for the current task, if one is known
-- the confidence boundary: working repo map, exact files still need to be read before editing
+- pack status: generated / refreshed / reused / stale / failed
+- where it was written
+- top-level ownership map
+- key docs, commands, entrypoints
+- likely files for the current task, if any
+- confidence boundary: working map, exact files still need to be read
 
-If V3 query routing is used, also report:
+If `--route-query` was used, also report ranked files, why they ranked, import/co-change neighbors worth checking, and token-heavy files to delay.
 
-- the highest-ranked files for the query
-- why they ranked highly
-- which graph neighbors or co-change partners should be checked next
-- whether any heavy files should be delayed because of token cost
+## Refresh triggers
+
+Rebuild after structural changes: new apps/services/packages, renamed important folders, moved entrypoints, new route groups or API surfaces, added/removed feature folders, changed architecture docs. After normal code edits, prefer `--check-stale` over an unconditional rebuild.
 
 ## Editing constraints
 
+- Write only inside `.claude/project-context/` unless the task requires code changes.
 - Never overwrite source files when generating context.
-- Only write inside `.claude/project-context/` unless the task requires code changes.
-- Prefer deterministic extraction over speculative summaries.
-- If a signal is uncertain, label it as probable rather than authoritative.
-- Do not commit generated context artifacts unless the user explicitly asks for them.
+- Do not commit generated artifacts unless the user asks.
+- If the builder fails, say so honestly, retry once, then reuse the existing pack only if it still matches the repo.
 
 ## Validation
 
-When you make code changes, use the repo's documented test, lint, or typecheck commands when they are clearly available and relevant.
+When making code changes, use the repo's documented test, lint, or typecheck commands when clearly available and relevant.
 
 Before concluding, verify:
 
-- the pack exists or failure was reported honestly
+- the pack exists or the failure was reported honestly
 - the pack points clearly to likely task-relevant folders
 - commands were extracted from real config where possible
 - entrypoints are plausible
 - the user-facing summary does not overclaim complete context awareness
-- exact file-location answers were verified with query routing, scoped search, or direct reads when needed
+- exact file-location answers were verified with query routing, scoped search, or direct reads
+
+## Anti-patterns
+
+- repo-wide grep as the first move
+- reading dozens of files before building a map
+- regenerating the pack after trivial edits
+- claiming complete repo awareness after only building the pack
+- ignoring the V3 query-ranked list when it exists
+
+## Supporting files
+
+- `scripts/build_context_pack_v3.py` — preferred builder with routing, graphs, token counts
+- `scripts/build_context_pack.py` — stable V2 baseline
+- `USAGE.md` — commands, examples, expected output shape, failure behavior
+- `README.md` — install/update, target paths, backup behavior

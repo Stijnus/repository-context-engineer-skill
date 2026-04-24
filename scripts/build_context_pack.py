@@ -680,6 +680,8 @@ def build_pack(root: Path) -> dict[str, object]:
     manifest = {
         "generated_at_utc": utc_now_iso(),
         "root": str(root),
+        "builder_version": "2.0.0",
+        "builder_features": ["task_routing", "token_counts", "change_hotspots", "staleness"],
         "file_count": len(files),
         "total_bytes": total_bytes,
         "top_level_folders": top_level_counts.most_common(25),

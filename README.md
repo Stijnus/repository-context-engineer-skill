@@ -118,6 +118,38 @@ That last command is the important V3 addition. It writes a ranked file list for
 - `.claude/project-context/QUERY_CONTEXT.md`
 - `.claude/project-context/QUERY_RESULTS.json`
 
+## Critical: install the pack-awareness hook
+
+The skill's files being on disk is **not enough** for Claude to actually use the pack. You also need a single global hook that tells Claude a pack exists. Without this hook Claude often ignores the pack and grep-bombs anyway.
+
+Add this to `~/.claude/settings.json` (global, one time):
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -f .claude/project-context/MANIFEST.json && echo 'REPO MAP AVAILABLE at .claude/project-context/. Before any Read/Glob/Grep for file discovery, read OVERVIEW.md + AREAS.md + TASK_ROUTING.md. For specific tasks run: python .claude/skills/repository-context-engineer/scripts/build_context_pack_v3.py . --route-query \"<task>\"' || true"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+How it behaves:
+
+- Fires once per prompt.
+- If the current repo has `.claude/project-context/MANIFEST.json`, injects a one-line reminder for Claude.
+- If the repo has no pack, the hook is a silent no-op (zero overhead).
+- Install once, works in every repo you later build a pack in.
+
+This is the single most important install. The copy in [`examples/settings.snippets.jsonc`](examples/settings.snippets.jsonc) includes both this hook and the optional auto-rebuild hook.
+
 ## Install for Claude Code
 
 Install into a project like this:

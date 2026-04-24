@@ -2,6 +2,19 @@
 
 Codex guidance for reducing wasteful repo-wide searching. Build and reuse a durable project context pack under `.claude/project-context/` before broad search. The pack is a working repo map, not line-by-line code memory — still read exact files before editing behavior.
 
+## Hard priority rule
+
+**If `.claude/project-context/MANIFEST.json` exists, read the pack BEFORE any file discovery (Read/Glob/Grep, `ls`, `find`, `rg`) and BEFORE asking clarification questions about where code lives.**
+
+The pack tells you which files to read. Searching without consulting it first is the exact waste this flow exists to prevent.
+
+Minimum first reads when a pack exists:
+1. `.claude/project-context/OVERVIEW.md`
+2. `.claude/project-context/AREAS.md`
+3. `.claude/project-context/TASK_ROUTING.md`
+
+Only after those should you do scoped search, and only inside the folders the pack points to.
+
 ## When to use
 
 Apply when any are true, even if the user does not name this flow:

@@ -1,14 +1,37 @@
 {
-  // Example snippets only. Merge carefully into your real Claude Code settings.
+  // Example snippets only. Merge carefully into your real Claude Code settings
+  // at either ~/.claude/settings.json (global, all repos) or
+  // <repo>/.claude/settings.json (project-local).
   //
-  // Optional: after Write/Edit/MultiEdit, refresh the project context pack if structure
-  // may have changed. This is intentionally conservative — many teams prefer to run
-  // the builder manually rather than on every file edit.
+  // ───────────────────────────────────────────────────────────────────────────
+  // RECOMMENDED: UserPromptSubmit hook for pack awareness.
   //
-  // The hook below prefers the V3 builder when present (query routing, import graph,
-  // token counts) and falls back to V2 if V3 is not installed. If neither builder is
-  // on disk the hook is a silent no-op.
+  // Install this in ~/.claude/settings.json ONCE. In any repo that has a
+  // .claude/project-context/MANIFEST.json, Claude will be reminded to read
+  // the pack before doing Read/Glob/Grep. In repos without a pack, the hook
+  // is a silent no-op (zero overhead).
+  //
+  // This is the single most important install for making the skill actually
+  // fire. Without it, Claude often ignores the pack and grep-bombs anyway.
+  // ───────────────────────────────────────────────────────────────────────────
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -f .claude/project-context/MANIFEST.json && echo 'REPO MAP AVAILABLE at .claude/project-context/. Before any Read/Glob/Grep for file discovery, read OVERVIEW.md + AREAS.md + TASK_ROUTING.md. For specific tasks run: python .claude/skills/repository-context-engineer/scripts/build_context_pack_v3.py . --route-query \"<task>\"' || true"
+          }
+        ]
+      }
+    ],
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OPTIONAL: Auto-refresh the pack after Write/Edit/MultiEdit.
+    //
+    // Conservative — many teams prefer to run the builder manually rather than
+    // on every file edit. Prefers V3 when present, falls back to V2.
+    // ─────────────────────────────────────────────────────────────────────────
     "PostToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit",

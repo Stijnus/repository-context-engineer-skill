@@ -1,12 +1,25 @@
 ---
 name: repository-context-engineer
-description: Use when working in an unfamiliar or large repository, when a task requires understanding architecture before editing, when file discovery keeps failing, or when the agent is about to run repeated grep/search/read cycles looking for ownership of a feature, route, service, or subsystem.
+description: Use when working in an unfamiliar or large repository, when asked "where is X", "which files own X", "where should I add X", "find the files for Y", or any question that requires locating code across the repo, when a task requires understanding architecture before editing, or when the agent is about to run repeated grep/search/read cycles.
 allowed-tools: Read, Write, Edit, MultiEdit, Bash, Glob, Grep, LS
 ---
 
 # Repository Context Engineer
 
 Reduce wasteful repo-wide searching by building and reusing a durable project context pack under `.claude/project-context/`. The pack is a working repo map, not line-by-line code memory — still read exact files before editing behavior.
+
+## Hard priority rule
+
+**If `.claude/project-context/MANIFEST.json` exists, read the pack BEFORE any Read/Glob/Grep and BEFORE invoking `brainstorming` or any other clarification skill.**
+
+The pack tells you which files to read. Read/Glob/Grep without consulting it first is the exact waste this Skill exists to prevent.
+
+Minimum first reads when a pack exists:
+1. `.claude/project-context/OVERVIEW.md`
+2. `.claude/project-context/AREAS.md`
+3. `.claude/project-context/TASK_ROUTING.md`
+
+Only after those should you consider Read/Glob/Grep, and only inside the folders the pack points to.
 
 ## When to use
 

@@ -4,16 +4,19 @@ Codex guidance for reducing wasteful repo-wide searching. Build and reuse a dura
 
 ## Hard priority rule
 
-**If `.claude/project-context/MANIFEST.json` exists, read the pack BEFORE any file discovery (Read/Glob/Grep, `ls`, `find`, `rg`) and BEFORE asking clarification questions about where code lives.**
+**If `.claude/project-context/MANIFEST.json` exists, READ the pack. Do NOT rebuild it. Do NOT ask clarification questions first. Do NOT `ls`, `find`, `rg`, or open source files first.**
 
-The pack tells you which files to read. Searching without consulting it first is the exact waste this flow exists to prevent.
+The pack already exists and already ranks files by relevance. Your first action is to read it, not to regenerate it and not to search the repo.
 
-Minimum first reads when a pack exists:
+Required first reads when a pack exists:
 1. `.claude/project-context/OVERVIEW.md`
 2. `.claude/project-context/AREAS.md`
 3. `.claude/project-context/TASK_ROUTING.md`
 
-Only after those should you do scoped search, and only inside the folders the pack points to.
+Only then:
+- Read the exact source files the pack points to.
+- Run `--route-query` ONLY if TASK_ROUTING.md does not already cover the task. Check first.
+- Rebuild ONLY if the pack's `MANIFEST.json` is structurally stale — never just because a task arrived.
 
 ## When to use
 

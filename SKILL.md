@@ -10,16 +10,19 @@ Reduce wasteful repo-wide searching by building and reusing a durable project co
 
 ## Hard priority rule
 
-**If `.claude/project-context/MANIFEST.json` exists, read the pack BEFORE any Read/Glob/Grep and BEFORE invoking `brainstorming` or any other clarification skill.**
+**If `.claude/project-context/MANIFEST.json` exists, READ the pack. Do NOT rebuild it. Do NOT invoke brainstorming or other clarification skills first. Do NOT Read/Glob/Grep source files first.**
 
-The pack tells you which files to read. Read/Glob/Grep without consulting it first is the exact waste this Skill exists to prevent.
+The pack already exists and already ranks files by relevance. Your first action is to read it, not to regenerate it and not to search the repo.
 
-Minimum first reads when a pack exists:
+Required first reads when a pack exists:
 1. `.claude/project-context/OVERVIEW.md`
 2. `.claude/project-context/AREAS.md`
 3. `.claude/project-context/TASK_ROUTING.md`
 
-Only after those should you consider Read/Glob/Grep, and only inside the folders the pack points to.
+Only then:
+- Read the exact source files the pack points to.
+- Run `--route-query` ONLY if TASK_ROUTING.md does not already cover the task. Check first.
+- Rebuild ONLY if the pack's `MANIFEST.json` is structurally stale (missing subsystem, outdated folder layout) — never just because a task arrived.
 
 ## When to use
 

@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -f .claude/project-context/MANIFEST.json && echo 'REPO MAP AVAILABLE at .claude/project-context/. Before any Read/Glob/Grep for file discovery, read OVERVIEW.md + AREAS.md + TASK_ROUTING.md. For specific tasks run: python .claude/skills/repository-context-engineer/scripts/build_context_pack_v3.py . --route-query \"<task>\"' || true"
+            "command": "test -f .claude/project-context/MANIFEST.json && echo 'REPO MAP AVAILABLE at .claude/project-context/. READ these files before any Read/Glob/Grep: OVERVIEW.md, AREAS.md, TASK_ROUTING.md. The pack already exists — do NOT rebuild it. The pack already ranks files for common tasks; consult it to pick the right source files, then read those exact files.' || true"
           }
         ]
       }

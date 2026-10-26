@@ -1,12 +1,27 @@
 # Repository Context Engineer
 
-A repository-understanding package for **Claude Code and Codex**.
+Reusable repository maps and task-focused file routing for **Claude Code and Codex**, generated with Python.
 
-This project is designed for the exact problem you described: agents spending too much time repeatedly searching, grepping, and reading random files because they do not have a durable understanding of the codebase.
+[Try it locally](#try-it-locally) · [Usage guide](USAGE.md) · [Claude Code setup](#install-for-claude-code) · [Codex setup](#install-for-codex) · [License](LICENSE)
+
+Generate a durable context pack so coding agents can start from a repository map instead of repeating broad searches. The pack is a navigation aid; exact source files still need to be read before changing behavior.
+
+## Try it locally
+
+With Python 3 and Git installed, build a context pack for this repository itself:
+
+```bash
+git clone https://github.com/Stijnus/repository-context-engineer-skill.git
+cd repository-context-engineer-skill
+python3 scripts/build_context_pack_v3.py .
+python3 scripts/build_context_pack_v3.py . --route-query "context pack generation"
+```
+
+Open `.claude/project-context/OVERVIEW.md` for the repository map and `.claude/project-context/QUERY_CONTEXT.md` for ranked files. These commands generate local context files; they do not install a skill or modify your global agent settings. Follow the setup sections below to integrate the instructions with your agent.
 
 ## What this package targets
 
-This repo now ships the two instruction surfaces you actually want:
+This repository provides two instruction surfaces:
 
 - **Claude Code**: `SKILL.md`
 - **Codex**: `AGENTS.md`
